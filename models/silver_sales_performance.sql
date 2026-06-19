@@ -48,6 +48,7 @@ select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, vosw
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
        mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, mp.pcode, mp.pcodename, mp.flag as flag_sku,
        voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
+       vscw.qty as salfo_qty,
        ttw.target_qty, sss.qty as stock_subdist,
        ws.stock_ibn, oi.omset as sta,
        a.avg_5w_qty,  a.avg_5w_value,
@@ -62,6 +63,7 @@ join spx.v_omset_subdist_weekly_bw voswb on mp.pcode = voswb.pcode
 join spx.m_distributor md on voswb.distributor_id = md.distributor_id
 join spx.v_sales_hierarchy vsh on voswb.distributor_id = vsh.distributor_id
 join spx.m_emp_team met on met.distributor_id = voswb.distributor_id and met.team_id = mp.div_id and met.emp_id = vsh.ss_id
+left join spx.v_salfo_confirm_weekly vscw on cast(voswb.tahun as int) =vscw.year and cast(voswb.week as int) = vscw.week and voswb.pcode = vscw.pcode and voswb.distributor_id = vscw.distributor_id
 left join spx.t_target_weekly ttw
   on cast(voswb.tahun as int) = ttw.year and cast(voswb.week as int) = ttw.week
   and voswb.pcode = ttw.pcode and voswb.distributor_id = ttw.distributor_id
