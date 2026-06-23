@@ -43,6 +43,14 @@ omset_ibn as (
   select year, week, pcode, sum(qty_omset) as omset
   from spx.t_omset
   group by year, week, pcode
+),
+avgs_ibn as (
+  select oi.pcode,
+         avg(oi.omset) filter (where w.in_5w) as avg_5w_sta_qty
+  from omset_ibn oi
+  join window_weeks w
+    on oi.year = w.year and oi.week = w.week
+  group by oi.pcode
 )
 select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, voswb.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
@@ -52,7 +60,7 @@ select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, vosw
        ttw.target_qty, ttw.target_value, sss.qty as stock_subdist,
        ws.stock_ibn, oi.omset as sta,
        a.avg_5w_qty,  a.avg_5w_value,
-       a.avg_13w_qty, a.avg_13w_value, now() as loaded_at
+       a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, now() as loaded_at
 from spx.m_product mp
 left join spx.m_division mdiv on mdiv.div_id = mp.div_id
 left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
@@ -79,3 +87,4 @@ left join omset_ibn oi
   and voswb.pcode = oi.pcode
 left join avgs a
   on a.distributor_id = voswb.distributor_id and a.pcode = voswb.pcode
+left join avgs_ibn aibn on voswb.pcode = aibn.pcode
