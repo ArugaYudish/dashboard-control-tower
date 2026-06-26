@@ -54,9 +54,10 @@ avgs_ibn as (
 )
 select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, to_char(to_date(cast(voswb.periode as text), 'MM'), 'Mon') as periodName, voswb.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
-       mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, mp.pcode, mp.pcodename, mp.flag as flag_sku,
-       voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
-       vscw.qty as salfo_qty,
+       mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, mp.parent_id, mparent.parent_nm as parent_name,
+       mp.pcode, mp.pcodename, mp.flag_season as flag_sku,
+       voswb.distributor_id, md.distributor_nm as distributorN_name, voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
+       vscw.qty as salfo_qty, vscw.qty * coalesce(mpd.price,0) as salfo_value,
        ttw.target_qty, ttw.target_value, sss.qty as stock_subdist,
        ws.stock_ibn, oi.omset as sta,
        a.avg_5w_qty,  a.avg_5w_value,
@@ -67,6 +68,7 @@ left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
 left join spx.m_subbrand msubbrand
   on  msubbrand.subbrand_id = mp.subbrand_id
   and msubbrand.brand_id    = mp.brand_id
+left join spx.m_parent mparent on mparent.parent_id = mp.parent_id
 join spx.v_omset_subdist_weekly_bw voswb on mp.pcode = voswb.pcode
 join spx.m_distributor md on voswb.distributor_id = md.distributor_id
 join spx.v_sales_hierarchy vsh on voswb.distributor_id = vsh.distributor_id
@@ -88,3 +90,4 @@ left join omset_ibn oi
 left join avgs a
   on a.distributor_id = voswb.distributor_id and a.pcode = voswb.pcode
 left join avgs_ibn aibn on voswb.pcode = aibn.pcode
+left join spx.m_price_divisi mpd on cast(voswb.tahun as int) =mpd.year and voswb.pcode = mpd.pcode and md.sls_div = mpd.sls_div
