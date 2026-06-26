@@ -52,7 +52,7 @@ avgs_ibn as (
     on oi.year = w.year and oi.week = w.week
   group by oi.pcode
 )
-select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, voswb.week,
+select md.sls_div as channel, voswb.tahun as year, voswb.periode as period, to_char(to_date(cast(voswb.periode as text), 'MM'), 'Mon') as periodName, voswb.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
        mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, mp.pcode, mp.pcodename, mp.flag as flag_sku,
        voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
