@@ -21,9 +21,7 @@ left join (select pcode, pcodename, p.div_id, md.div_nm, p.brand_id, mb.brand_nm
 	left join spx.m_brand mb on p.brand_id = mb.brand_id
 	left join spx.m_subbrand ms on p.brand_id = ms.brand_id and p.subbrand_id = ms.subbrand_id 
 	left join spx.m_parent mp on p.parent_id = mp.parent_id) mp on ttw.pcode = mp.pcode 
-	left join spx.v_sales_hierarchy vsh on ttw.distributor_id = vsh.distributor_id
-	join spx.m_emp_team met on met.distributor_id = ttw.distributor_id and met.emp_id = vsh.ss_id
-	join spx.m_team tm ON met.team_id = tm.team_id and mp.div_id = tm.div_id
+	left join spx.v_sales_hierarchy_product vsh on ttw.distributor_id = vsh.distributor_id and ttw.pcode = vsh.pcode
 	left join spx.m_distributor md on ttw.distributor_id = md.distributor_id
 	left join spx.v_salfo_confirm_weekly vscw on cw.year = vscw.year and cw.week = vscw.week and ttw.pcode = vscw.pcode and ttw.distributor_id = vscw.distributor_id
 	left join spx.v_omset_subdist_weekly_bw vosbw on cw.year = cast(vosbw.tahun as numeric) and cw.week = cast(vosbw.week as numeric) and cw.period = cast(vosbw.periode as numeric) and ttw.pcode = vosbw.pcode and ttw.distributor_id = vosbw.distributor_id
