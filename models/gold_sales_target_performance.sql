@@ -28,44 +28,44 @@ base_data AS (
 unpivoted_data AS (
     -- Blok QTY
     SELECT 
-        *, 
+        year, period, week, pcode, op_current_year, op_current_period, op_current_week, is_ytd,
         'QTY' AS pilihan_satuan, 
-        target_qty AS target_final, 
-        stm_qty AS stm_final,
-        COALESCE(salfo_qty, 0) AS salfo_final 
+        target_qty AS target_value_final, 
+        stm_qty AS stm_value_final,
+        COALESCE(salfo_qty, 0) AS salfo_value_final 
     FROM base_data
     
     UNION ALL
     
     -- Blok VALUE
     SELECT 
-        *, 
+        year, period, week, pcode, op_current_year, op_current_period, op_current_week, is_ytd,
         'VALUE' AS pilihan_satuan, 
-        target_value AS target_final, 
-        stm_value AS stm_final,
-        COALESCE(salfo_value, 0) AS salfo_final 
+        target_value AS target_value_final, 
+        stm_value AS stm_value_final,
+        COALESCE(salfo_value, 0) AS salfo_value_final 
     FROM base_data
 )
 
--- Proses Self-Join untuk melekatkan jualan Tahun Lalu (LY) secara horizontal
+-- Trik Super Ngebut: Ambil data tahun lalu pakai LAG (Tanpa JOIN!)
 SELECT 
-    t1.year,
-    t1.period,
-    t1.week,
-    t1.pcode,
-    t1.pilihan_satuan,
-    t1.op_current_year,
-    t1.op_current_period,
-    t1.op_current_week,
-    t1.is_ytd,
-    t1.target_final AS target_value_final,
-    t1.stm_final AS stm_value_final,
-    t1.salfo_final AS salfo_value_final,
-    -- Kolom pembanding Growth: Mengambil nilai STM year - 1
-    COALESCE(t2.stm_final, 0) AS stm_value_ly_final 
-FROM unpivoted_data t1
-LEFT JOIN unpivoted_data t2 
-    ON t1.year::numeric = t2.year::numeric + 1 
-   AND t1.week = t2.week 
-   AND t1.pcode = t2.pcode 
-   AND t1.pilihan_satuan = t2.pilihan_satuan
+    year,
+    period,
+    week,
+    pcode,
+    pilihan_satuan,
+    op_current_year,
+    op_current_period,
+    op_current_week,
+    is_ytd,
+    target_value_final,
+    stm_value_final,
+    salfo_value_final,
+    -- Mengintip data 1 baris di belakangnya (tahun sebelumnya) berdasarkan partisi SKU & Week yang sama
+    COALESCE(
+        LAG(stm_value_final, 1) OVER(
+            PARTITION BY pcode, week, pilihan_satuan 
+            ORDER BY year::numeric
+        ), 0
+    ) AS stm_value_ly_final
+FROM unpivoted_data
