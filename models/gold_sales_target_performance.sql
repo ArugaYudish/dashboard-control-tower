@@ -26,46 +26,42 @@ base_data AS (
     CROSS JOIN current_operational c
 ),
 unpivoted_data AS (
-    -- Blok QTY
+    -- Blok QTY (Membawa seluruh kolom stp.* via base_data)
     SELECT 
-        year, period, week, pcode, op_current_year, op_current_period, op_current_week, is_ytd,
+        b.*,
         'QTY' AS pilihan_satuan, 
-        target_qty AS target_value_final, 
-        stm_qty AS stm_value_final,
-        COALESCE(salfo_qty, 0) AS salfo_value_final 
-    FROM base_data
+        b.target_qty AS target_value_final, 
+        b.stm_qty AS stm_value_final,
+        COALESCE(b.salfo_qty, 0) AS salfo_value_final 
+    FROM base_data b
     
     UNION ALL
     
-    -- Blok VALUE
+    -- Blok VALUE (Membawa seluruh kolom stp.* via base_data)
     SELECT 
-        year, period, week, pcode, op_current_year, op_current_period, op_current_week, is_ytd,
+        b.*,
         'VALUE' AS pilihan_satuan, 
-        target_value AS target_value_final, 
-        stm_value AS stm_value_final,
-        COALESCE(salfo_value, 0) AS salfo_value_final 
-    FROM base_data
+        b.target_value AS target_value_final, 
+        b.stm_value AS stm_value_final,
+        COALESCE(b.salfo_value, 0) AS salfo_value_final 
+    FROM base_data b
+),
+-- data_ty memuat SEMUA KOLOM DIMENSI untuk kebutuhan filter dashboard lu
+data_ty AS (
+    SELECT * FROM unpivoted_data
+),
+-- data_ly HANYA mengambil key penyambung saja agar proses search indexing di database kilat
+data_ly AS (
+    SELECT year, week, pcode, pilihan_satuan, stm_final FROM unpivoted_data
 )
 
--- Trik Super Ngebut: Ambil data tahun lalu pakai LAG (Tanpa JOIN!)
+-- Satukan secara horizontal
 SELECT 
-    year,
-    period,
-    week,
-    pcode,
-    pilihan_satuan,
-    op_current_year,
-    op_current_period,
-    op_current_week,
-    is_ytd,
-    target_value_final,
-    stm_value_final,
-    salfo_value_final,
-    -- Mengintip data 1 baris di belakangnya (tahun sebelumnya) berdasarkan partisi SKU & Week yang sama
-    COALESCE(
-        LAG(stm_value_final, 1) OVER(
-            PARTITION BY pcode, week, pilihan_satuan 
-            ORDER BY year::numeric
-        ), 0
-    ) AS stm_value_ly_final
-FROM unpivoted_data
+    t1.*, -- Mengeluarkan SEMUA kolom filter bawaan asli dari silver (Branch, Region, SKU, dll)
+    COALESCE(t2.stm_final, 0) AS stm_value_ly_final 
+FROM data_ty t1
+LEFT JOIN data_ly t2 
+    ON t1.year::numeric = t2.year::numeric + 1 
+   AND t1.week = t2.week 
+   AND t1.pcode = t2.pcode 
+   AND t1.pilihan_satuan = t2.pilihan_satuan
