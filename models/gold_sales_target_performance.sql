@@ -1,5 +1,6 @@
 {{ config(
     materialized='table',
+    schema='spx',
     alias='gold_sales_target_performance',
     indexes=[
       {'columns': ['year', 'week', 'pcode', 'pilihan_satuan']}
@@ -26,7 +27,7 @@ base_data AS (
     CROSS JOIN current_operational c
 ),
 unpivoted_data AS (
-    -- Blok QTY (Membawa seluruh kolom stp.* via base_data)
+    -- Blok QTY
     SELECT 
         b.*,
         'QTY' AS pilihan_satuan, 
@@ -37,7 +38,7 @@ unpivoted_data AS (
     
     UNION ALL
     
-    -- Blok VALUE (Membawa seluruh kolom stp.* via base_data)
+    -- Blok VALUE
     SELECT 
         b.*,
         'VALUE' AS pilihan_satuan, 
@@ -46,19 +47,18 @@ unpivoted_data AS (
         COALESCE(b.salfo_value, 0) AS salfo_value_final 
     FROM base_data b
 ),
--- data_ty memuat SEMUA KOLOM DIMENSI untuk kebutuhan filter dashboard lu
 data_ty AS (
     SELECT * FROM unpivoted_data
 ),
--- data_ly HANYA mengambil key penyambung saja agar proses search indexing di database kilat
 data_ly AS (
-    SELECT year, week, pcode, pilihan_satuan, stm_final FROM unpivoted_data
+    -- DI SINI PERBAIKANNYA: Menggunakan stm_value_final sesuai alias di atas
+    SELECT year, week, pcode, pilihan_satuan, stm_value_final FROM unpivoted_data
 )
 
 -- Satukan secara horizontal
 SELECT 
-    t1.*, -- Mengeluarkan SEMUA kolom filter bawaan asli dari silver (Branch, Region, SKU, dll)
-    COALESCE(t2.stm_final, 0) AS stm_value_ly_final 
+    t1.*, 
+    COALESCE(t2.stm_value_final, 0) AS stm_value_ly_final 
 FROM data_ty t1
 LEFT JOIN data_ly t2 
     ON t1.year::numeric = t2.year::numeric + 1 
