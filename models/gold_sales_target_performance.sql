@@ -24,16 +24,30 @@ base_data AS (
         CASE WHEN stp.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd
     FROM spx.silver_target_performance stp
     CROSS JOIN current_operational c
-)
-
--- Proses menyatukan data horizontal (Melipat QTY dan VALUE)
-, unpivoted_data AS (
-    SELECT *, 'QTY' AS pilihan_satuan, target_qty AS target_final, stm_qty AS stm_final FROM base_data
+),
+unpivoted_data AS (
+    -- Blok QTY
+    SELECT 
+        *, 
+        'QTY' AS pilihan_satuan, 
+        target_qty AS target_final, 
+        stm_qty AS stm_final,
+        COALESCE(salfo_qty, 0) AS salfo_final 
+    FROM base_data
+    
     UNION ALL
-    SELECT *, 'VALUE' AS pilihan_satuan, target_value AS target_final, stm_value AS stm_final FROM base_data
+    
+    -- Blok VALUE
+    SELECT 
+        *, 
+        'VALUE' AS pilihan_satuan, 
+        target_value AS target_final, 
+        stm_value AS stm_final,
+        COALESCE(salfo_value, 0) AS salfo_final 
+    FROM base_data
 )
 
--- Trik Kunci: Menarik data STM Tahun Lalu ke baris Tahun Ini
+-- Proses Self-Join untuk melekatkan jualan Tahun Lalu (LY) secara horizontal
 SELECT 
     t1.year,
     t1.period,
@@ -46,11 +60,12 @@ SELECT
     t1.is_ytd,
     t1.target_final AS target_value_final,
     t1.stm_final AS stm_value_final,
-    -- Kolom sakti: Mengambil nilai STM tahun lalu (Year - 1) pada week & pcode yang sama
+    t1.salfo_final AS salfo_value_final,
+    -- Kolom pembanding Growth: Mengambil nilai STM year - 1
     COALESCE(t2.stm_final, 0) AS stm_value_ly_final 
 FROM unpivoted_data t1
 LEFT JOIN unpivoted_data t2 
     ON t1.year::numeric = t2.year::numeric + 1 
    AND t1.week = t2.week 
    AND t1.pcode = t2.pcode 
-   AND t1.pilihan_satuan = t2.pilihan_satuan;
+   AND t1.pilihan_satuan = t2.pilihan_satuan
