@@ -1,6 +1,5 @@
 {{ config(
     materialized='table',
-    schema='spx',
     alias='gold_sales_target_performance',
     indexes=[
       {'columns': ['year', 'week', 'pcode', 'pilihan_satuan']}
