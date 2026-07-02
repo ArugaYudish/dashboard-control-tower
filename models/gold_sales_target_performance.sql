@@ -24,7 +24,8 @@ base_data AS (
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
         CASE WHEN stp.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd
-    FROM {{ source('spx', 'silver_target_performance') }} stp
+    -- Menggunakan nama tabel mentah (Bypass YAML)
+    FROM spx.silver_target_performance stp
     CROSS JOIN current_operational c
     WHERE stp.year::text IN (c.cur_year, c.last_year)
 )
