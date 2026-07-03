@@ -49,6 +49,7 @@ matrix_combined AS (
         COALESCE(t1.period, t2.period) AS period,
         COALESCE(t1.periodname, t2.periodname) AS periodname,
         COALESCE(t1.week, t2.week) AS week,
+        COALESCE(t1.flag, t2.flag) AS flag,
         COALESCE(t1.pcode, t2.pcode) AS pcode,
         COALESCE(t1.pcodename, t2.pcodename) AS pcodename,
         COALESCE(t1.flag_sku, t2.flag_sku) AS flag_sku,
@@ -81,25 +82,15 @@ matrix_combined AS (
         COALESCE(t1.op_current_week, t2.op_current_week) AS op_current_week,
         COALESCE(t1.is_ytd_calc, t2.is_ytd_calc) AS is_ytd,
 
-        -- METRIK ORIGINAL TAHUN INI (TY 2026) DARI SILVER
+        -- METRIK ORIGINAL TAHUN INI (TY 2026) DARI SILVER (Sesuai Skema Asli)
         COALESCE(t1.target_qty, 0) AS target_qty,
         COALESCE(t1.target_value, 0) AS target_value,
         COALESCE(t1.stm_qty, 0) AS stm_qty,
         COALESCE(t1.stm_value, 0) AS stm_value,
         COALESCE(t1.salfo_qty, 0) AS salfo_qty,
         COALESCE(t1.salfo_value, 0) AS salfo_value,
-        COALESCE(t1.stock_subdist, 0) AS stock_subdist,
-        COALESCE(t1.stock_ibn, 0) AS stock_ibn,
-        COALESCE(t1.sta_qty, 0) AS sta_qty,
-        COALESCE(t1.sta_value, 0) AS sta_value,
-        COALESCE(t1.avg_5w_qty, 0) AS avg_5w_qty,
-        COALESCE(t1.avg_5w_value, 0) AS avg_5w_value,
-        COALESCE(t1.avg_13w_qty, 0) AS avg_13w_qty,
-        COALESCE(t1.avg_13w_value, 0) AS avg_13w_value,
-        COALESCE(t1.avg_5w_sta_qty, 0) AS avg_5w_sta_qty,
-        COALESCE(t1.avg_5w_sta_value, 0) AS avg_5w_sta_value,
 
-        -- METRIK ORIGINAL TAHUN LALU (LY 2025) UNTUK PEMBANDING HORIZONTAL
+        -- METRIK ORIGINAL TAHUN LALU (LY 2025) UNTUK PEMBANDING HORIZONTAL SAKLEK
         COALESCE(t2.stm_qty, 0) AS stm_qty_ly,
         COALESCE(t2.stm_value, 0) AS stm_value_ly
     FROM data_ty t1
@@ -114,15 +105,12 @@ matrix_combined AS (
 -- 4. PROSES UNPIVOT VERTIKAL
 -- Blok QTY
 SELECT 
-    -- 42 Kolom Asli Silver (Tanpa loaded_at)
-    channel, year, period, periodname, week, 
+    -- 33 Kolom Asli Silver Ter-Representasi
+    channel, year, period, periodname, week, flag,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
     pcode, pcodename, flag_sku, distributor_id, distributor_name, 
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
-    stock_subdist, stock_ibn, sta_qty, sta_value, 
-    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, 
-    avg_5w_sta_qty, avg_5w_sta_value,
     
     -- Kolom Kontrol Operasional Hub
     op_current_year, op_current_period, op_current_week, is_ytd,
@@ -132,9 +120,9 @@ SELECT
     target_qty AS target_value_final, 
     stm_qty AS stm_value_final,
     salfo_qty AS salfo_value_final,
-    sta_qty AS sta_value_final,
-    avg_5w_qty AS avg_5w_value_final,
-    avg_13w_qty AS avg_13w_value_final,
+    0 AS sta_value_final, -- Placeholder karena kolom gaada di Silver
+    0 AS avg_5w_value_final,
+    0 AS avg_13w_value_final,
     stm_qty_ly AS stm_value_ly_final
 FROM matrix_combined
 
@@ -142,15 +130,12 @@ UNION ALL
 
 -- Blok VALUE
 SELECT 
-    -- 42 Kolom Asli Silver (Tanpa loaded_at)
-    channel, year, period, periodname, week, 
+    -- 33 Kolom Asli Silver Ter-Representasi
+    channel, year, period, periodname, week, flag,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
     pcode, pcodename, flag_sku, distributor_id, distributor_name, 
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
-    stock_subdist, stock_ibn, sta_qty, sta_value, 
-    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, 
-    avg_5w_sta_qty, avg_5w_sta_value,
     
     -- Kolom Kontrol Operasional Hub
     op_current_year, op_current_period, op_current_week, is_ytd,
@@ -160,8 +145,8 @@ SELECT
     target_value AS target_value_final, 
     stm_value AS stm_value_final,
     salfo_value AS salfo_value_final,
-    sta_value AS sta_value_final,
-    avg_5w_value AS avg_5w_value_final,
-    avg_13w_value AS avg_13w_value_final,
+    0 AS sta_value_final, -- Placeholder karena kolom gaada di Silver
+    0 AS avg_5w_value_final,
+    0 AS avg_13w_value_final,
     stm_value_ly AS stm_value_ly_final
 FROM matrix_combined
