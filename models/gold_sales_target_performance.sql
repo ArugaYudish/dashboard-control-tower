@@ -15,7 +15,6 @@ WITH current_operational AS (
     WHERE cdate::date = CURRENT_DATE
     LIMIT 1
 ),
--- 1. Ambil data utama (Tahun Ini) langsung dari Silver beserta flag YTD
 data_ty AS (
     SELECT 
         stp.*,
@@ -25,23 +24,30 @@ data_ty AS (
         CASE WHEN stp.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd
     FROM spx.silver_target_performance stp
     CROSS JOIN current_operational c
-)
-
--- 2. Langsung gabungkan secara horizontal dan lakukan unpivot di akhir
-, matrix_combined AS (
+),
+data_ly AS (
     SELECT 
-        t1.*,
-        -- Mengambil langsung dari tabel fisik Silver untuk meminimalisir temporary space
+        year, week, pcode, channel, distributor_id, -- Kunci keunikan baris data
+        stm_qty, stm_value 
+    FROM spx.silver_target_performance
+),
+matrix_combined AS (
+    SELECT 
+        t1.*, -- SEMUA KOLOM FILTER LENGKAP UTUH TERBAWA (Hierarki Sales, Brand, dll)
         COALESCE(t2.stm_qty, 0) AS stm_qty_ly,
         COALESCE(t2.stm_value, 0) AS stm_value_ly
     FROM data_ty t1
-    LEFT JOIN spx.silver_target_performance t2 
-        ON (t1.year::numeric - 1)::text = t2.year::text  -- Mengunci indeks tahun lalu secara presisi
+    LEFT JOIN data_ly t2 
+        ON (t1.year::numeric - 1) = t2.year  -- Karena tipe datanya numeric, langsung kurangi tanpa cast text
        AND t1.week = t2.week 
        AND t1.pcode = t2.pcode
+       -- KUNCI UTAMA: Mencegah Cartesian Product / Ledakan Data
+       AND t1.channel = t2.channel
+       AND t1.distributor_id = t2.distributor_id
 )
 
--- 3. Blok Output Akhir (Seluruh kolom filter t1.* aman terbawa lengkap)
+-- PROSES UNPIVOT AKHIR
+-- Blok QTY
 SELECT 
     m.*,
     'QTY' AS pilihan_satuan, 
@@ -53,6 +59,7 @@ FROM matrix_combined m
 
 UNION ALL
 
+-- Blok VALUE
 SELECT 
     m.*,
     'VALUE' AS pilihan_satuan, 
