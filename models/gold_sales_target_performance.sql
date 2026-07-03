@@ -53,7 +53,7 @@ matrix_combined AS (
         COALESCE(t1.pcodename, t2.pcodename) AS pcodename,
         COALESCE(t1.flag_sku, t2.flag_sku) AS flag_sku,
         COALESCE(t1.distributor_id, t2.distributor_id) AS distributor_id,
-        COALESCE(t1.distributorn_name, t2.distributorn_name) AS distributorn_name,
+        COALESCE(t1.distributor_name, t2.distributor_name) AS distributor_name,
         
         -- Hierarki Management Sales Force Mayora
         COALESCE(t1.nsm_id, t2.nsm_id) AS nsm_id,
@@ -130,7 +130,7 @@ matrix_combined AS (
 -- Blok QTY
 SELECT 
     -- Bawa semua kolom master & nilai original TY agar tidak berkurang (43 Kolom Asli Silver ter-representasi)
-    year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributorn_name,
+    year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributor_name,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
@@ -159,7 +159,7 @@ UNION ALL
 -- Blok VALUE
 SELECT 
     -- Bawa semua kolom master & nilai original TY agar tidak berkurang (43 Kolom Asli Silver ter-representasi)
-    year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributorn_name,
+    year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributor_name,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
