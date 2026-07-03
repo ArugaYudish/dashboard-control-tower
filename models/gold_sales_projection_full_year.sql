@@ -16,7 +16,7 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 1. DRIVER TARGET UTUH UNTUK TAHUN 2025 & 2026
+-- 1. DRIVER TARGET UTUH TAHUN 2025 & 2026
 target_driver AS (
     SELECT 
         t.*,
@@ -29,7 +29,18 @@ target_driver AS (
     WHERE t.year IN (2025, 2026)
 ),
 
--- 2. AMBIL REALISASI TRANSAKSI TY & LY
+-- 2. HITUNG TOTAL TARGET 1 TAHUN UTUH SECARA HORIZONTAL (KUNCIAN BEBAS SUBQUERY SUPERSET)
+target_full_year_aggr AS (
+    SELECT 
+        year, channel, distributor_id, pcode,
+        SUM(target_qty) AS total_target_qty_year,
+        SUM(target_value) AS total_target_value_year
+    FROM spx.silver_target_performance
+    WHERE year IN (2025, 2026)
+    GROUP BY year, channel, distributor_id, pcode
+),
+
+-- 3. AMBIL REALISASI TRANSAKSI TY & LY
 actual_sales AS (
     SELECT 
         year, period::text as period, week, pcode, channel, distributor_id,
@@ -41,7 +52,7 @@ actual_sales AS (
     WHERE year IN (2025, 2026)
 ),
 
--- 3. GABUNGKAN UTUH MENJADI MATRIKS BASE PER TAHUN/PER MINGGU
+-- 4. GABUNGKAN DATA MASTER TARGET, DATA AKTUAL, DAN TOTAL TARGET FULL YEAR
 matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
@@ -54,18 +65,23 @@ matrix_base AS (
         COALESCE(a.stm_qty, 0) AS stm_qty,
         COALESCE(a.stm_value, 0) AS stm_value,
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
-        COALESCE(a.salfo_value, 0) AS salfo_value
+        COALESCE(a.salfo_value, 0) AS salfo_value,
+        
+        -- Masukkan agregasi target 1 tahun utuh ke setiap baris mingguan
+        COALESCE(f.total_target_qty_year, 0) AS total_target_qty_year,
+        COALESCE(f.total_target_value_year, 0) AS total_target_value_year
     FROM target_driver t
+    LEFT JOIN target_full_year_aggr f
+        ON t.year = f.year AND t.channel = f.channel AND t.distributor_id = f.distributor_id AND t.pcode = f.pcode
     LEFT JOIN actual_sales a 
         ON t.year = a.year AND t.week = a.week AND t.period::text = a.period
        AND t.pcode = a.pcode AND t.channel = a.channel AND t.distributor_id = a.distributor_id
 ),
 
--- 4. TRIK HORIZONTAL JOIN UNTUK MENDAPATKAN DATA BULAN LALUSecara Presisi (Menangani Periode 1 -> Periode 12 Tahun Lalu)
+-- 5. HORIZONTAL JOIN UNTUK DATA BULAN LALU (LAST MONTH)
 matrix_with_lm AS (
     SELECT 
         curr.*,
-        -- Kita pasangkan week bulan lalu secara matematis (misal Week 5 berjalan berpasangan dengan Week 1 bulan lalu)
         COALESCE(prev.target_qty, 0) AS target_qty_lm,
         COALESCE(prev.target_value, 0) AS target_value_lm,
         COALESCE(prev.stm_qty, 0) AS stm_qty_lm,
@@ -75,14 +91,12 @@ matrix_with_lm AS (
         ON prev.channel = curr.channel
        AND prev.distributor_id = curr.distributor_id
        AND prev.pcode = curr.pcode
-       -- LOGIKA KUNCIAN: Tentukan Tahun dan Periode Masa Lalu
        AND prev.year = CASE WHEN curr.period = '1' THEN (curr.year - 1) ELSE curr.year END
        AND prev.period = CASE WHEN curr.period = '1' THEN '12' ELSE (curr.period::numeric - 1)::text END
-       -- Sinkronisasi urutan minggu di dalam bulan tersebut (Minggu ke-1 sd ke-4 di bulan lalu)
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- 5. UNPIVOT BLOCK FINAL (HANYA KELUARKAN TAHUN TRANSAKSI AKTIF 2026 UNTUK DASHBOARD)
+-- 6. UNPIVOT BLOCK FINAL (TAHUN TRANSAKSI AKTIF 2026 UNTUK SUPERSERET)
 SELECT 
     channel, year, period, periodname, week, 
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
@@ -95,7 +109,8 @@ SELECT
     stm_qty AS stm_value_final, 
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
-    stm_qty_lm AS stm_lm_final
+    stm_qty_lm AS stm_lm_final,
+    total_target_qty_year AS target_year_full_final -- Kolom sakti penyebut QTY
 FROM matrix_with_lm WHERE year = 2026
 
 UNION ALL
@@ -112,5 +127,6 @@ SELECT
     stm_value AS stm_value_final, 
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
-    stm_value_lm AS stm_value_lm_final
+    stm_value_lm AS stm_value_lm_final,
+    total_target_value_year AS target_year_full_final -- Kolom sakti penyebut VALUE
 FROM matrix_with_lm WHERE year = 2026
