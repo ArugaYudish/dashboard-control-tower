@@ -80,9 +80,8 @@ matrix_combined AS (
         COALESCE(t1.op_current_period, t2.op_current_period) AS op_current_period,
         COALESCE(t1.op_current_week, t2.op_current_week) AS op_current_week,
         COALESCE(t1.is_ytd_calc, t2.is_ytd_calc) AS is_ytd,
-        COALESCE(t1.loaded_at, t2.loaded_at) AS loaded_at,
 
-        -- 🌟 METRIK ASLI TAHUN INI (TY 2026) - DIBAWA UTUH KESELURUHAN
+        -- METRIK ASLI TAHUN INI (TY 2026)
         COALESCE(t1.target_qty, 0) AS target_qty,
         COALESCE(t1.target_value, 0) AS target_value,
         COALESCE(t1.stm_qty, 0) AS stm_qty,
@@ -100,7 +99,7 @@ matrix_combined AS (
         COALESCE(t1.avg_5w_sta_qty, 0) AS avg_5w_sta_qty,
         COALESCE(t1.avg_5w_sta_value, 0) AS avg_5w_sta_value,
 
-        -- 🌟 METRIK ASLI TAHUN LALU (LY 2025) - DIBAWA JUGA JIKA DIBUTUHKAN PADA CHART LAIN
+        -- METRIK ASLI TAHUN LALU (LY 2025)
         COALESCE(t2.target_qty, 0) AS target_qty_ly,
         COALESCE(t2.target_value, 0) AS target_value_ly,
         COALESCE(t2.stm_qty, 0) AS stm_qty_ly,
@@ -126,24 +125,21 @@ matrix_combined AS (
        AND t1.distributor_id = t2.distributor_id
 )
 
--- 4. PROSES UNPIVOT VERTIKAL (Menghasilkan Kolom Final pendukung Toggle Superset)
+-- 4. PROSES UNPIVOT VERTIKAL
 -- Blok QTY
 SELECT 
-    -- Bawa semua kolom master & nilai original TY agar tidak berkurang (43 Kolom Asli Silver ter-representasi)
     year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributor_name,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
     stock_subdist, stock_ibn, sta_qty, sta_value, 
-    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, avg_5w_sta_qty, avg_5w_sta_value, loaded_at,
+    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, avg_5w_sta_qty, avg_5w_sta_value,
     op_current_year, op_current_period, op_current_week, is_ytd,
     
-    -- Tambahkan juga versi LY murni horizontal jika chart lain butuh data cross-year langsung
     target_qty_ly, target_value_ly, stm_qty_ly, stm_value_ly, salfo_qty_ly, salfo_value_ly,
     stock_subdist_ly, stock_ibn_ly, sta_qty_ly, sta_value_ly,
     avg_5w_qty_ly, avg_5w_value_ly, avg_13w_qty_ly, avg_13w_value_ly, avg_5w_sta_qty_ly, avg_5w_sta_value_ly,
 
-    -- ➕ 5 Kolom baru hasil penyesuaian Toggle QTY di Superset
     'QTY' AS pilihan_satuan, 
     target_qty AS target_value_final, 
     stm_qty AS stm_value_final,
@@ -158,21 +154,18 @@ UNION ALL
 
 -- Blok VALUE
 SELECT 
-    -- Bawa semua kolom master & nilai original TY agar tidak berkurang (43 Kolom Asli Silver ter-representasi)
     year, period, periodname, week, flag, channel, pcode, pcodename, flag_sku, distributor_id, distributor_name,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
     stock_subdist, stock_ibn, sta_qty, sta_value, 
-    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, avg_5w_sta_qty, avg_5w_sta_value, loaded_at,
+    avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, avg_5w_sta_qty, avg_5w_sta_value,
     op_current_year, op_current_period, op_current_week, is_ytd,
     
-    -- Tambahkan juga versi LY murni horizontal jika chart lain butuh data cross-year langsung
     target_qty_ly, target_value_ly, stm_qty_ly, stm_value_ly, salfo_qty_ly, salfo_value_ly,
     stock_subdist_ly, stock_ibn_ly, sta_qty_ly, sta_value_ly,
     avg_5w_qty_ly, avg_5w_value_ly, avg_13w_qty_ly, avg_13w_value_ly, avg_5w_sta_qty_ly, avg_5w_sta_value_ly,
 
-    -- ➕ 5 Kolom baru hasil penyesuaian Toggle VALUE di Superset
     'VALUE' AS pilihan_satuan, 
     target_value AS target_value_final, 
     stm_value AS stm_value_final,
