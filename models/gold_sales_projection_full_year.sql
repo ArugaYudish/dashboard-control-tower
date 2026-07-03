@@ -16,7 +16,7 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 1. DRIVER TARGET UTUH
+-- 1. DRIVER TARGET UTUH (Dinamis tanpa hardcoded tahun)
 target_driver AS (
     SELECT 
         t.*,
@@ -28,7 +28,17 @@ target_driver AS (
     CROSS JOIN current_operational c
 ),
 
--- 2. AMBIL TRANSAKSI AKTUAL & FORECAST
+-- 2. KUNCIAN TARGET 1 TAHUN UTUH (Selesai di level DB, aman dari filter dashboard)
+target_annual_statis AS (
+    SELECT 
+        year, channel, distributor_id, pcode,
+        SUM(target_qty) AS total_target_qty_year,
+        SUM(target_value) AS total_target_value_year
+    FROM spx.silver_target_performance
+    GROUP BY year, channel, distributor_id, pcode
+),
+
+-- 3. AMBIL TRANSAKSI AKTUAL & FORECAST
 actual_sales AS (
     SELECT 
         year, period::numeric as period, week, pcode, channel, distributor_id,
@@ -39,7 +49,7 @@ actual_sales AS (
     FROM spx.silver_sales_performance
 ),
 
--- 3. GABUNGKAN SECARA HORIZONTAL STANDAR
+-- 4. GABUNGKAN DATA UTUH
 matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
@@ -53,14 +63,20 @@ matrix_base AS (
         COALESCE(a.stm_qty, 0) AS stm_qty,
         COALESCE(a.stm_value, 0) AS stm_value,
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
-        COALESCE(a.salfo_value, 0) AS salfo_value
+        COALESCE(a.salfo_value, 0) AS salfo_value,
+        
+        -- Masukkan total target tahunan horizontal ke setiap baris minggu
+        COALESCE(ann.total_target_qty_year, 0) AS total_target_qty_year,
+        COALESCE(ann.total_target_value_year, 0) AS total_target_value_year
     FROM target_driver t
+    LEFT JOIN target_annual_statis ann
+        ON t.year = ann.year AND t.channel = ann.channel AND t.distributor_id = ann.distributor_id AND t.pcode = ann.pcode
     LEFT JOIN actual_sales a 
         ON t.year = a.year AND t.week = a.week AND t.period = a.period
        AND t.pcode = a.pcode AND t.channel = a.channel AND t.distributor_id = a.distributor_id
 ),
 
--- 4. KEMBALIKAN LOGIKA HORIZONTAL UNTUK LAST MONTH (MENGATASI PERIODE 1 -> 12 TAHUN LALU secara DINAMIS)
+-- 5. LOGIKA DATA BULAN LALU (LAST MONTH)
 matrix_with_lm AS (
     SELECT 
         curr.*,
@@ -78,7 +94,7 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- 5. UNPIVOT FINAL DENGAN PEMBAGI TARGET BERSIH (HANYA MUNCUL DI WEEK 1 SUPAYA TIDAK TER-SUM BERULANG)
+-- 6. UNPIVOT FINAL BLOCK DENGAN KOLOM TARGET BERSIH (AMBIL RATIO PROPOSAL MINGGUAN)
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
@@ -86,7 +102,8 @@ SELECT
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
     stm_qty_lm AS stm_lm_final,
-    CASE WHEN week::numeric = 1 THEN target_qty ELSE 0 END AS target_year_clean_final
+    -- Trik sakti: target tahunan dibagi 52, agar kalau di-SUM di Superset nilainya kembali pas utuh!
+    (total_target_qty_year / 52.0) AS target_full_year_statis
 FROM matrix_with_lm
 
 UNION ALL
@@ -98,5 +115,5 @@ SELECT
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
     stm_value_lm AS stm_lm_final,
-    CASE WHEN week::numeric = 1 THEN target_value ELSE 0 END AS target_year_clean_final
+    (total_target_value_year / 52.0) AS target_full_year_statis
 FROM matrix_with_lm
