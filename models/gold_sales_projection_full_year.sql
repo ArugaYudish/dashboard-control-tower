@@ -2,7 +2,7 @@
     materialized='table',
     alias='gold_sales_projection_full_year',
     indexes=[
-      {'columns': ['year', 'week', 'pcode', 'pilihan_satuan']}
+      {'columns': ['year', 'period', 'week', 'pilihan_satuan']}
     ]
 ) }}
 
@@ -16,7 +16,7 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 1. AMBIL DRIVER TARGET UTUH 52 WEEK DARI MASTER TARGET
+-- 1. DRIVER TARGET UTUH UNTUK TAHUN 2025 & 2026
 target_driver AS (
     SELECT 
         t.*,
@@ -26,60 +26,91 @@ target_driver AS (
         CASE WHEN t.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc
     FROM spx.silver_target_performance t
     CROSS JOIN current_operational c
-    WHERE t.year = 2026  -- Fokus murni untuk proyeksi forecast tahun berjalan
+    WHERE t.year IN (2025, 2026)
 ),
 
--- 2. AMBIL REALISASI STM & SALFO DARI SALES PERFORMANCE (YANG HANYA SAMPAI WEEK BERJALAN)
+-- 2. AMBIL REALISASI TRANSAKSI TY & LY
 actual_sales AS (
     SELECT 
-        week, pcode, channel, distributor_id,
+        year, period::text as period, week, pcode, channel, distributor_id,
         COALESCE(stm_qty, 0) AS stm_qty,
         COALESCE(stm_value, 0) AS stm_value,
         COALESCE(salfo_qty, 0) AS salfo_qty,
         COALESCE(salfo_value, 0) AS salfo_value
     FROM spx.silver_sales_performance
-    WHERE year = 2026
+    WHERE year IN (2025, 2026)
 ),
 
--- 3. LEFT JOIN UNTUK MENJAGA WEEK MASA DEPAN TETAP AMAN DI DALAM DRIVER
-combined_data AS (
+-- 3. GABUNGKAN UTUH MENJADI MATRIKS BASE PER TAHUN/PER MINGGU
+matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
         t.nsm_id, t.nsm_name, t.grsm_id, t.grsm_name, t.rsm_id, t.rsm_name, t.ss_id, t.ss_name,
         t.sbu_id, t.sbu_name, t.brand_id, t.brand_name, t.subbrand_id, t.subbrand_name, t.parent_id, t.parent_name,
         t.pcode, t.pcodename, t.flag_sku, t.distributor_id, t.distributor_name,
         t.op_current_year, t.op_current_period, t.op_current_week, t.is_ytd_calc,
-        
-        -- Target mutlak 52 week dari driver
         COALESCE(t.target_qty, 0) AS target_qty,
         COALESCE(t.target_value, 0) AS target_value,
-        
-        -- Realisasi penjualan (akan otomatis NULL/0 untuk week masa depan, which is PERFECT)
         COALESCE(a.stm_qty, 0) AS stm_qty,
         COALESCE(a.stm_value, 0) AS stm_value,
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value
     FROM target_driver t
     LEFT JOIN actual_sales a 
-        ON t.week = a.week 
-       AND t.pcode = a.pcode 
-       AND t.channel = a.channel 
-       AND t.distributor_id = a.distributor_id
+        ON t.year = a.year AND t.week = a.week AND t.period::text = a.period
+       AND t.pcode = a.pcode AND t.channel = a.channel AND t.distributor_id = a.distributor_id
+),
+
+-- 4. TRIK HORIZONTAL JOIN UNTUK MENDAPATKAN DATA BULAN LALUSecara Presisi (Menangani Periode 1 -> Periode 12 Tahun Lalu)
+matrix_with_lm AS (
+    SELECT 
+        curr.*,
+        -- Kita pasangkan week bulan lalu secara matematis (misal Week 5 berjalan berpasangan dengan Week 1 bulan lalu)
+        COALESCE(prev.target_qty, 0) AS target_qty_lm,
+        COALESCE(prev.target_value, 0) AS target_value_lm,
+        COALESCE(prev.stm_qty, 0) AS stm_qty_lm,
+        COALESCE(prev.stm_value, 0) AS stm_value_lm
+    FROM matrix_base curr
+    LEFT JOIN matrix_base prev
+        ON prev.channel = curr.channel
+       AND prev.distributor_id = curr.distributor_id
+       AND prev.pcode = curr.pcode
+       -- LOGIKA KUNCIAN: Tentukan Tahun dan Periode Masa Lalu
+       AND prev.year = CASE WHEN curr.period = '1' THEN (curr.year - 1) ELSE curr.year END
+       AND prev.period = CASE WHEN curr.period = '1' THEN '12' ELSE (curr.period::numeric - 1)::text END
+       -- Sinkronisasi urutan minggu di dalam bulan tersebut (Minggu ke-1 sd ke-4 di bulan lalu)
+       AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- 4. UNPIVOT BLOCK
+-- 5. UNPIVOT BLOCK FINAL (HANYA KELUARKAN TAHUN TRANSAKSI AKTIF 2026 UNTUK DASHBOARD)
 SELECT 
-    *, 'QTY' AS pilihan_satuan,
-    target_qty AS target_value_final,
-    stm_qty AS stm_value_final,
-    salfo_qty AS salfo_value_final
-FROM combined_data
+    channel, year, period, periodname, week, 
+    nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
+    sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
+    pcode, pcodename, flag_sku, distributor_id, distributor_name, 
+    op_current_year, op_current_period, op_current_week, is_ytd_calc,
+    
+    'QTY' AS pilihan_satuan,
+    target_qty AS target_value_final, 
+    stm_qty AS stm_value_final, 
+    salfo_qty AS salfo_value_final,
+    target_qty_lm AS target_lm_final,
+    stm_qty_lm AS stm_lm_final
+FROM matrix_with_lm WHERE year = 2026
 
 UNION ALL
 
 SELECT 
-    *, 'VALUE' AS pilihan_satuan,
-    target_value AS target_value_final,
-    stm_value AS stm_value_final,
-    salfo_value AS salfo_value_final
-FROM combined_data
+    channel, year, period, periodname, week, 
+    nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
+    sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
+    pcode, pcodename, flag_sku, distributor_id, distributor_name, 
+    op_current_year, op_current_period, op_current_week, is_ytd_calc,
+    
+    'VALUE' AS pilihan_satuan,
+    target_value AS target_value_final, 
+    stm_value AS stm_value_final, 
+    salfo_value AS salfo_value_final,
+    target_value_lm AS target_lm_final,
+    stm_value_lm AS stm_value_lm_final
+FROM matrix_with_lm WHERE year = 2026
