@@ -75,14 +75,13 @@ matrix_combined AS (
         COALESCE(t1.parent_id, t2.parent_id) AS parent_id,
         COALESCE(t1.parent_name, t2.parent_name) AS parent_name,
         
-        -- Dimensi Master Operasional Cycle & Log Metadata
+        -- Dimensi Master Operasional Cycle
         COALESCE(t1.op_current_year, t2.op_current_year) AS op_current_year,
         COALESCE(t1.op_current_period, t2.op_current_period) AS op_current_period,
         COALESCE(t1.op_current_week, t2.op_current_week) AS op_current_week,
         COALESCE(t1.is_ytd_calc, t2.is_ytd_calc) AS is_ytd,
-        COALESCE(t1.loaded_at, t2.loaded_at) AS loaded_at,
 
-        -- 🌟 METRIK ORIGINAL TAHUN INI (TY 2026) DARI SILVER
+        -- METRIK ORIGINAL TAHUN INI (TY 2026) DARI SILVER
         COALESCE(t1.target_qty, 0) AS target_qty,
         COALESCE(t1.target_value, 0) AS target_value,
         COALESCE(t1.stm_qty, 0) AS stm_qty,
@@ -100,7 +99,7 @@ matrix_combined AS (
         COALESCE(t1.avg_5w_sta_qty, 0) AS avg_5w_sta_qty,
         COALESCE(t1.avg_5w_sta_value, 0) AS avg_5w_sta_value,
 
-        -- 🌟 METRIK ORIGINAL TAHUN LALU (LY 2025) UNTUK PEMBANDING HORIZONTAL
+        -- METRIK ORIGINAL TAHUN LALU (LY 2025) UNTUK PEMBANDING HORIZONTAL
         COALESCE(t2.stm_qty, 0) AS stm_qty_ly,
         COALESCE(t2.stm_value, 0) AS stm_value_ly
     FROM data_ty t1
@@ -115,7 +114,7 @@ matrix_combined AS (
 -- 4. PROSES UNPIVOT VERTIKAL
 -- Blok QTY
 SELECT 
-    -- Tulis eksplisit 43 kolom bawaan asli agar wujud fisik kolomnya ada di layer Gold
+    -- 42 Kolom Asli Silver (Tanpa loaded_at)
     channel, year, period, periodname, week, 
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
@@ -123,12 +122,12 @@ SELECT
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
     stock_subdist, stock_ibn, sta_qty, sta_value, 
     avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, 
-    avg_5w_sta_qty, avg_5w_sta_value, loaded_at,
+    avg_5w_sta_qty, avg_5w_sta_value,
     
     -- Kolom Kontrol Operasional Hub
     op_current_year, op_current_period, op_current_week, is_ytd,
 
-    -- ➕ 5 Kolom baru hasil penyesuaian Toggle QTY di Superset
+    -- 5 Kolom baru hasil penyesuaian Toggle QTY di Superset
     'QTY' AS pilihan_satuan, 
     target_qty AS target_value_final, 
     stm_qty AS stm_value_final,
@@ -143,7 +142,7 @@ UNION ALL
 
 -- Blok VALUE
 SELECT 
-    -- Tulis eksplisit 43 kolom bawaan asli agar wujud fisik kolomnya ada di layer Gold
+    -- 42 Kolom Asli Silver (Tanpa loaded_at)
     channel, year, period, periodname, week, 
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name, 
@@ -151,12 +150,12 @@ SELECT
     stm_qty, stm_value, salfo_qty, salfo_value, target_qty, target_value, 
     stock_subdist, stock_ibn, sta_qty, sta_value, 
     avg_5w_qty, avg_5w_value, avg_13w_qty, avg_13w_value, 
-    avg_5w_sta_qty, avg_5w_sta_value, loaded_at,
+    avg_5w_sta_qty, avg_5w_sta_value,
     
     -- Kolom Kontrol Operasional Hub
     op_current_year, op_current_period, op_current_week, is_ytd,
 
-    -- ➕ 5 Kolom baru hasil penyesuaian Toggle VALUE di Superset
+    -- 5 Kolom baru hasil penyesuaian Toggle VALUE di Superset
     'VALUE' AS pilihan_satuan, 
     target_value AS target_value_final, 
     stm_value AS stm_value_final,
