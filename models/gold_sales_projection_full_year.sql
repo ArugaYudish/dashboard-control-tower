@@ -24,9 +24,9 @@ target_driver AS (
         c.cur_week AS op_current_week,
         CASE WHEN t.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
         
-        -- KUNCI UTAMA: Hitung total 1 tahun penuh per SKU & Distributor (Aman dari potongan baris period/week)
-        SUM(COALESCE(t.target_qty, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_qty,
-        SUM(COALESCE(t.target_value, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_val
+        -- LOGIKA INDAH LU: Target tahunan per SKU dicicil / ecer dibagi 52 secara merata (Highly Granular Index)
+        SUM(COALESCE(t.target_qty, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) / 52.0 AS target_year_helper_qty,
+        SUM(COALESCE(t.target_value, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) / 52.0 AS target_year_helper_val
     FROM spx.silver_target_performance t
     CROSS JOIN current_operational c
 ),
@@ -57,7 +57,7 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Masukkan helper target tahunan ke basis data
+        -- Tempel horizontal helper eceran kita
         t.target_year_helper_qty,
         t.target_year_helper_val
     FROM target_driver t
