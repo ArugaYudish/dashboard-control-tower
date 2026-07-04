@@ -22,7 +22,11 @@ target_driver AS (
         c.cur_year AS op_current_year,
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
-        CASE WHEN t.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc
+        CASE WHEN t.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
+        
+        -- KUNCI UTAMA: Hitung total 1 tahun penuh per SKU & Distributor (Aman dari potongan baris period/week)
+        SUM(COALESCE(t.target_qty, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_qty,
+        SUM(COALESCE(t.target_value, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_val
     FROM spx.silver_target_performance t
     CROSS JOIN current_operational c
 ),
@@ -37,9 +41,6 @@ actual_sales AS (
     FROM spx.silver_sales_performance
 ),
 
--- =========================================================================
--- MATRIX BASE DENGAN WINDOW FUNCTION GRANULAR (HASIL SIMULASI VALID)
--- =========================================================================
 matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
@@ -48,7 +49,7 @@ matrix_base AS (
         t.pcode, t.pcodename, t.flag_sku, t.distributor_id, t.distributor_name,
         t.op_current_year, t.op_current_period, t.op_current_week, t.is_ytd_calc,
         
-        -- Data dinamis per week (Untuk dipotong filter Superset secara alami)
+        -- Data transaksi mingguan murni
         COALESCE(t.target_qty, 0) AS target_qty,
         COALESCE(t.target_value, 0) AS target_value,
         COALESCE(a.stm_qty, 0) AS stm_qty,
@@ -56,9 +57,9 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- SUNTIKAN HORIZONTAL TARGET TAHUNAN SESUAI SIMULASI (ANTI-TIMEOUT & DINAMIS)
-        SUM(COALESCE(t.target_qty, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_qty,
-        SUM(COALESCE(t.target_value, 0)) OVER(PARTITION BY t.year, t.channel, t.distributor_id, t.pcode) AS target_year_helper_val
+        -- Masukkan helper target tahunan ke basis data
+        t.target_year_helper_qty,
+        t.target_year_helper_val
     FROM target_driver t
     LEFT JOIN actual_sales a 
         ON t.year = a.year 
@@ -86,9 +87,6 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- =========================================================================
--- FINAL UNPIVOT BLOCK: SINKRONISASI KOLOM QTY & VALUE
--- =========================================================================
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
