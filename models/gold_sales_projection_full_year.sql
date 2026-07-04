@@ -16,14 +16,16 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 1. KUNCI MUTLAK: Hitung total target murni 1 tahun penuh di level paling atas (Hanya per TAHUN)
+-- =========================================================================
+-- 1. KUNCI TARGET TAHUNAN: Agregat murni per Tahun & Channel (Kebal Filter Waktu)
+-- =========================================================================
 target_total_tahun AS (
     SELECT 
-        year,
+        year, channel,
         SUM(target_qty) AS target_qty_pure_year,
         SUM(target_value) AS target_val_pure_year
     FROM spx.silver_target_performance
-    GROUP BY year
+    GROUP BY year, channel
 ),
 
 target_driver AS (
@@ -55,6 +57,7 @@ matrix_base AS (
         t.pcode, t.pcodename, t.flag_sku, t.distributor_id, t.distributor_name,
         t.op_current_year, t.op_current_period, t.op_current_week, t.is_ytd_calc,
         
+        -- Data transaksi mingguan berjalan murni
         COALESCE(t.target_qty, 0) AS target_qty,
         COALESCE(t.target_value, 0) AS target_value,
         COALESCE(a.stm_qty, 0) AS stm_qty,
@@ -62,11 +65,22 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Masukkan angka total tahunan murni nasional ke dalam baris tanpa group by atribut lain
+        -- Tempel Target 1 Tahun Penuh Nasional per Channel (Nge-lock Saklek)
         COALESCE(n.target_qty_pure_year, 0) AS target_year_helper_qty,
-        COALESCE(n.target_val_pure_year, 0) AS target_year_helper_val
+        COALESCE(n.target_val_pure_year, 0) AS target_year_helper_val,
+
+        -- =========================================================================
+        -- 2. KUNCI AKTUAL YTD: Hitung akumulasi jualan dari Awal Tahun s/d Minggu Berjalan.
+        -- Di-PARTITION BY murni per Year & Channel agar datanya aman dari potong kompas filter waktu Superset.
+        -- =========================================================================
+        SUM(CASE WHEN t.week::numeric <= t.op_current_week THEN COALESCE(a.stm_qty, 0) + COALESCE(a.salfo_qty, 0) ELSE 0 END) 
+            OVER(PARTITION BY t.year, t.channel) AS ytd_sales_helper_qty,
+
+        SUM(CASE WHEN t.week::numeric <= t.op_current_week THEN COALESCE(a.stm_value, 0) + COALESCE(a.salfo_value, 0) ELSE 0 END) 
+            OVER(PARTITION BY t.year, t.channel) AS ytd_sales_helper_val
+            
     FROM target_driver t
-    LEFT JOIN target_total_tahun n ON t.year = n.year -- JOIN murni level tahun, kebal dari filter kualitatif apa pun
+    LEFT JOIN target_total_tahun n ON t.year = n.year AND t.channel = n.channel
     LEFT JOIN actual_sales a 
         ON t.year = a.year 
        AND t.week = a.week 
@@ -93,6 +107,9 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
+-- =========================================================================
+-- UNIFY OUTPUT VIA UNION ALL (PILIHAN SATUAN: QTY vs VALUE)
+-- =========================================================================
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
@@ -100,7 +117,8 @@ SELECT
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
     stm_qty_lm AS stm_lm_final,
-    target_year_helper_qty AS target_year_helper
+    target_year_helper_qty AS target_year_helper,
+    ytd_sales_helper_qty AS ytd_sales_helper
 FROM matrix_with_lm
 
 UNION ALL
@@ -112,5 +130,6 @@ SELECT
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
     stm_value_lm AS stm_lm_final,
-    target_year_helper_val AS target_year_helper
+    target_year_helper_val AS target_year_helper,
+    ytd_sales_helper_val AS ytd_sales_helper
 FROM matrix_with_lm
