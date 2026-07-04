@@ -27,30 +27,26 @@ target_driver AS (
     CROSS JOIN current_operational c
 ),
 
--- =========================================================================
--- MASTER HELPER 1 TAHUN PENUH: Kunci Target, STM, dan SALFO Utuh Des-Jan
--- =========================================================================
-annual_helper_statis AS (
+-- 1. HITUNG TARGET NASIONAL SECARA ABSOLUT UTUH 1 TAHUN (MURNI TANPA JOIN TRANSAKSI)
+target_national_statis AS (
     SELECT 
-        t.year, t.channel, t.distributor_id, t.pcode,
-        -- Total Target 1 Tahun
-        SUM(COALESCE(t.target_qty, 0)) AS total_target_qty_year,
-        SUM(COALESCE(t.target_value, 0)) AS total_target_value_year,
-        -- Total Realisasi STM 1 Tahun (Jan - Des)
-        SUM(COALESCE(s.stm_qty, 0)) AS total_stm_qty_year,
-        SUM(COALESCE(s.stm_value, 0)) AS total_stm_value_year,
-        -- Total Proyeksi SALFO 1 Tahun (Jan - Des)
-        SUM(COALESCE(s.salfo_qty, 0)) AS total_salfo_qty_year,
-        SUM(COALESCE(s.salfo_value, 0)) AS total_salfo_value_year
-    FROM spx.silver_target_performance t
-    LEFT JOIN spx.silver_sales_performance s
-        ON t.year = s.year 
-       AND t.week = s.week 
-       AND t.period::text = s.period::text -- <--- FIX: Dipaksa cast ke text biar gak bentrok numeric vs varchar
-       AND t.pcode = s.pcode 
-       AND t.channel = s.channel 
-       AND t.distributor_id = s.distributor_id
-    GROUP BY t.year, t.channel, t.distributor_id, t.pcode
+        year,
+        SUM(target_qty) AS nat_target_qty_year,
+        SUM(target_value) AS nat_target_value_year
+    FROM spx.silver_target_performance
+    GROUP BY year
+),
+
+-- 2. HITUNG SALES NASIONAL UTUH 1 TAHUN SEBAGAI HELPER ESTIMASI
+sales_national_statis AS (
+    SELECT 
+        year,
+        SUM(COALESCE(stm_qty, 0)) AS nat_stm_qty_year,
+        SUM(COALESCE(stm_value, 0)) AS nat_stm_value_year,
+        SUM(COALESCE(salfo_qty, 0)) AS nat_salfo_qty_year,
+        SUM(COALESCE(salfo_value, 0)) AS nat_salfo_value_year
+    FROM spx.silver_sales_performance
+    GROUP BY year
 ),
 
 actual_sales AS (
@@ -71,7 +67,7 @@ matrix_base AS (
         t.pcode, t.pcodename, t.flag_sku, t.distributor_id, t.distributor_name,
         t.op_current_year, t.op_current_period, t.op_current_week, t.is_ytd_calc,
         
-        -- Data Dinamis per Week (Untuk dipotong filter Superset secara natural)
+        -- Data dinamis per week
         COALESCE(t.target_qty, 0) AS target_qty,
         COALESCE(t.target_value, 0) AS target_value,
         COALESCE(a.stm_qty, 0) AS stm_qty,
@@ -79,16 +75,16 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Kuncian Angka Mati Horizontal 1 Tahun Penuh (Sama di Semua Baris Week)
-        COALESCE(ann.total_target_qty_year, 0) AS target_year_helper_qty,
-        COALESCE(ann.total_target_value_year, 0) AS target_year_helper_val,
-        COALESCE(ann.total_stm_qty_year, 0) AS stm_year_helper_qty,
-        COALESCE(ann.total_stm_value_year, 0) AS stm_year_helper_val,
-        COALESCE(ann.total_salfo_qty_year, 0) AS salfo_year_helper_qty,
-        COALESCE(ann.total_salfo_value_year, 0) AS salfo_year_helper_val
+        -- KUNCIAN GLOBAL NASIONAL (Sama rata di semua baris data tahun tersebut!)
+        COALESCE(n.nat_target_qty_year, 0) AS target_year_helper_qty,
+        COALESCE(n.nat_target_value_year, 0) AS target_year_helper_val,
+        COALESCE(s.nat_stm_qty_year, 0) AS stm_year_helper_qty,
+        COALESCE(s.nat_stm_value_year, 0) AS stm_year_helper_val,
+        COALESCE(s.nat_salfo_qty_year, 0) AS salfo_year_helper_qty,
+        COALESCE(s.nat_salfo_value_year, 0) AS salfo_year_helper_val
     FROM target_driver t
-    LEFT JOIN annual_helper_statis ann
-        ON t.year = ann.year AND t.channel = ann.channel AND t.distributor_id = ann.distributor_id AND t.pcode = ann.pcode
+    LEFT JOIN target_national_statis n ON t.year = n.year
+    LEFT JOIN sales_national_statis s ON t.year = s.year
     LEFT JOIN actual_sales a 
         ON t.year = a.year AND t.week = a.week AND t.period = a.period
        AND t.pcode = a.pcode AND t.channel = a.channel AND t.distributor_id = a.distributor_id
@@ -111,9 +107,6 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- =========================================================================
--- FINAL UNPIVOT BLOCK: SINKRONISASI KOLOM QTY & VALUE
--- =========================================================================
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
