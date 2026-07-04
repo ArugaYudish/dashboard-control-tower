@@ -44,8 +44,12 @@ annual_helper_statis AS (
         SUM(COALESCE(s.salfo_value, 0)) AS total_salfo_value_year
     FROM spx.silver_target_performance t
     LEFT JOIN spx.silver_sales_performance s
-        ON t.year = s.year AND t.week = s.week AND t.period = s.period
-       AND t.pcode = s.pcode AND t.channel = s.channel AND t.distributor_id = s.distributor_id
+        ON t.year = s.year 
+       AND t.week = s.week 
+       AND t.period::text = s.period::text -- <--- FIX: Dipaksa cast ke text biar gak bentrok numeric vs varchar
+       AND t.pcode = s.pcode 
+       AND t.channel = s.channel 
+       AND t.distributor_id = s.distributor_id
     GROUP BY t.year, t.channel, t.distributor_id, t.pcode
 ),
 
@@ -75,7 +79,7 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Kuncian Angka Mati Horizontal 1 Tahun Penuh Sesuai Ide Lu (Sama di Semua Baris Week)
+        -- Kuncian Angka Mati Horizontal 1 Tahun Penuh (Sama di Semua Baris Week)
         COALESCE(ann.total_target_qty_year, 0) AS target_year_helper_qty,
         COALESCE(ann.total_target_value_year, 0) AS target_year_helper_val,
         COALESCE(ann.total_stm_qty_year, 0) AS stm_year_helper_qty,
