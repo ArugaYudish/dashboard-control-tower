@@ -62,7 +62,7 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Ambil angka utuh 1 tahun
+        -- Masukkan total target tahunan secara horizontal (ada di setiap baris week 1-52)
         COALESCE(ann.total_target_qty_year, 0) AS total_target_qty_year,
         COALESCE(ann.total_target_value_year, 0) AS total_target_value_year
     FROM target_driver t
@@ -90,7 +90,7 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- UNPIVOT FINAL DENGAN TRIK SAKTI KUNCIAN BARIS UTAMA
+-- FINAL SELECT: Target ditaruh merata di semua baris minggu
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
@@ -98,8 +98,7 @@ SELECT
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
     stm_qty_lm AS stm_lm_final,
-    -- Target 1 tahun penuh HANYA diletakkan di baris data week pertama di tahun tersebut
-    CASE WHEN week::numeric = 1 THEN total_target_qty_year ELSE 0 END AS target_year_clean_final
+    total_target_qty_year AS target_year_raw_final
 FROM matrix_with_lm
 
 UNION ALL
@@ -111,6 +110,5 @@ SELECT
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
     stm_value_lm AS stm_lm_final,
-    -- Target 1 tahun penuh HANYA diletakkan di baris data week pertama di tahun tersebut
-    CASE WHEN week::numeric = 1 THEN total_target_value_year ELSE 0 END AS target_year_clean_final
+    total_target_value_year AS target_year_raw_final
 FROM matrix_with_lm
