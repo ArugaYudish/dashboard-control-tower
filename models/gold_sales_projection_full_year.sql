@@ -16,6 +16,16 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
+-- 1. KUNCI MUTLAK: Hitung total target murni 1 tahun penuh di level paling atas (Hanya per TAHUN)
+target_total_tahun AS (
+    SELECT 
+        year,
+        SUM(target_qty) AS target_qty_pure_year,
+        SUM(target_value) AS target_val_pure_year
+    FROM spx.silver_target_performance
+    GROUP BY year
+),
+
 target_driver AS (
     SELECT 
         t.*,
@@ -25,16 +35,6 @@ target_driver AS (
         CASE WHEN t.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc
     FROM spx.silver_target_performance t
     CROSS JOIN current_operational c
-),
-
--- KUNCI UTAMA: Hitung total target murni 1 tahun penuh di level nasional/atribut teratas
-target_nasional_statis AS (
-    SELECT 
-        year, channel,
-        SUM(target_qty) AS target_qty_year,
-        SUM(target_value) AS target_val_year
-    FROM spx.silver_target_performance
-    GROUP BY year, channel
 ),
 
 actual_sales AS (
@@ -55,7 +55,6 @@ matrix_base AS (
         t.pcode, t.pcodename, t.flag_sku, t.distributor_id, t.distributor_name,
         t.op_current_year, t.op_current_period, t.op_current_week, t.is_ytd_calc,
         
-        -- Data transaksi mingguan murni
         COALESCE(t.target_qty, 0) AS target_qty,
         COALESCE(t.target_value, 0) AS target_value,
         COALESCE(a.stm_qty, 0) AS stm_qty,
@@ -63,11 +62,11 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Angka bulat target 1 tahun penuh yang udah dikunci mati per channel
-        COALESCE(n.target_qty_year, 0) AS target_year_helper_qty,
-        COALESCE(n.target_val_year, 0) AS target_year_helper_val
+        -- Masukkan angka total tahunan murni nasional ke dalam baris tanpa group by atribut lain
+        COALESCE(n.target_qty_pure_year, 0) AS target_year_helper_qty,
+        COALESCE(n.target_val_pure_year, 0) AS target_year_helper_val
     FROM target_driver t
-    LEFT JOIN target_nasional_statis n ON t.year = n.year AND t.channel = n.channel
+    LEFT JOIN target_total_tahun n ON t.year = n.year -- JOIN murni level tahun, kebal dari filter kualitatif apa pun
     LEFT JOIN actual_sales a 
         ON t.year = a.year 
        AND t.week = a.week 
