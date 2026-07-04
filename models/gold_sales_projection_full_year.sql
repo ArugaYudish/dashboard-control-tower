@@ -16,7 +16,6 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 1. DRIVER TARGET UTUH
 target_driver AS (
     SELECT 
         t.*,
@@ -28,7 +27,7 @@ target_driver AS (
     CROSS JOIN current_operational c
 ),
 
--- 2. HITUNG TARGET 1 TAHUN UTUH SECARA HORIZONTAL PER SKU & DISTRIBUTOR
+-- Hitung total target 1 tahun utuh per SKU & Distributor
 target_annual_statis AS (
     SELECT 
         year, channel, distributor_id, pcode,
@@ -38,7 +37,6 @@ target_annual_statis AS (
     GROUP BY year, channel, distributor_id, pcode
 ),
 
--- 3. AMBIL DATA TRANSAKSI AKTUAL & FORECAST
 actual_sales AS (
     SELECT 
         year, period::numeric as period, week, pcode, channel, distributor_id,
@@ -49,7 +47,6 @@ actual_sales AS (
     FROM spx.silver_sales_performance
 ),
 
--- 4. GABUNGKAN DATA UTUH DENGAN DISTRIBUSI TOTAL MINGGU AKTIF (52 WEEKS)
 matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
@@ -65,10 +62,9 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Bagian Krusial: Target 1 Tahun Utuh langsung kita bagi 52 di level DB!
-        -- Jadi saat Superset memotong data per minggu/bulan, kita tinggal kalikan (52 / jumlah week terfilter)
-        COALESCE(ann.total_target_qty_year, 0) / 52.0 AS target_qty_full_year_base,
-        COALESCE(ann.total_target_value_year, 0) / 52.0 AS target_value_full_year_base
+        -- Ambil angka utuh 1 tahun
+        COALESCE(ann.total_target_qty_year, 0) AS total_target_qty_year,
+        COALESCE(ann.total_target_value_year, 0) AS total_target_value_year
     FROM target_driver t
     LEFT JOIN target_annual_statis ann
         ON t.year = ann.year AND t.channel = ann.channel AND t.distributor_id = ann.distributor_id AND t.pcode = ann.pcode
@@ -77,7 +73,6 @@ matrix_base AS (
        AND t.pcode = a.pcode AND t.channel = a.channel AND t.distributor_id = a.distributor_id
 ),
 
--- 5. LOGIKA DATA BULAN LALU (LAST MONTH)
 matrix_with_lm AS (
     SELECT 
         curr.*,
@@ -95,7 +90,7 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- 6. UNPIVOT FINAL BLOCK DENGAN BARIS AMAN
+-- UNPIVOT FINAL DENGAN TRIK SAKTI KUNCIAN BARIS UTAMA
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
@@ -103,7 +98,8 @@ SELECT
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
     stm_qty_lm AS stm_lm_final,
-    target_qty_full_year_base AS target_full_year_statis
+    -- Target 1 tahun penuh HANYA diletakkan di baris data week pertama di tahun tersebut
+    CASE WHEN week::numeric = 1 THEN total_target_qty_year ELSE 0 END AS target_year_clean_final
 FROM matrix_with_lm
 
 UNION ALL
@@ -115,5 +111,6 @@ SELECT
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
     stm_value_lm AS stm_lm_final,
-    target_value_full_year_base AS target_full_year_statis
+    -- Target 1 tahun penuh HANYA diletakkan di baris data week pertama di tahun tersebut
+    CASE WHEN week::numeric = 1 THEN total_target_value_year ELSE 0 END AS target_year_clean_final
 FROM matrix_with_lm
