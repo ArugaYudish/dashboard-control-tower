@@ -27,7 +27,7 @@ target_driver AS (
     CROSS JOIN current_operational c
 ),
 
--- Hitung total target 1 tahun utuh per SKU & Distributor
+-- Hitung total target utuh 1 tahun nasional per SKU & Distributor
 target_annual_statis AS (
     SELECT 
         year, channel, distributor_id, pcode,
@@ -35,6 +35,15 @@ target_annual_statis AS (
         SUM(target_value) AS total_target_value_year
     FROM spx.silver_target_performance
     GROUP BY year, channel, distributor_id, pcode
+),
+
+-- Cari tahu week paling minimal (week pertama) untuk tiap-tiap periode secara dinamis
+min_week_per_period AS (
+    SELECT 
+        year, period, 
+        MIN(week::numeric) AS first_week_of_period
+    FROM spx.silver_target_performance
+    GROUP BY year, period
 ),
 
 actual_sales AS (
@@ -62,10 +71,13 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- Masukkan total target tahunan secara horizontal (ada di setiap baris week 1-52)
+        -- Deteksi apakah minggu ini adalah minggu pertama di periodenya
+        CASE WHEN t.week::numeric = mw.first_week_of_period THEN 1 ELSE 0 END AS is_first_week_of_period,
         COALESCE(ann.total_target_qty_year, 0) AS total_target_qty_year,
         COALESCE(ann.total_target_value_year, 0) AS total_target_value_year
     FROM target_driver t
+    INNER JOIN min_week_per_period mw 
+        ON t.year = mw.year AND t.period = mw.period
     LEFT JOIN target_annual_statis ann
         ON t.year = ann.year AND t.channel = ann.channel AND t.distributor_id = ann.distributor_id AND t.pcode = ann.pcode
     LEFT JOIN actual_sales a 
@@ -90,7 +102,7 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- FINAL SELECT: Target ditaruh merata di semua baris minggu
+-- FINAL UNPIVOT: Kunci target tahunan murni di minggu pertama per periode saja!
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
@@ -98,7 +110,7 @@ SELECT
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
     stm_qty_lm AS stm_lm_final,
-    total_target_qty_year AS target_year_raw_final
+    CASE WHEN is_first_week_of_period = 1 THEN total_target_qty_year ELSE 0 END AS target_full_year_locked
 FROM matrix_with_lm
 
 UNION ALL
@@ -110,5 +122,5 @@ SELECT
     salfo_value AS salfo_value_final,
     target_value_lm AS target_lm_final,
     stm_value_lm AS stm_lm_final,
-    total_target_value_year AS target_year_raw_final
+    CASE WHEN is_first_week_of_period = 1 THEN total_target_value_year ELSE 0 END AS target_full_year_locked
 FROM matrix_with_lm
