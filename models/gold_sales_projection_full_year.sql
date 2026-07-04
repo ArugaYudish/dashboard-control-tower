@@ -27,7 +27,7 @@ target_driver AS (
     CROSS JOIN current_operational c
 ),
 
--- 1. Hitung total target 1 tahun utuh per SKU & Distributor
+-- 1. Hitung total target 1 tahun utuh per SKU & Distributor nasional
 target_annual_statis AS (
     SELECT 
         year, channel, distributor_id, pcode,
@@ -47,7 +47,7 @@ actual_sales AS (
     FROM spx.silver_sales_performance
 ),
 
--- 2. Gabungkan data dan hitung rasio bobot target mingguan terhadap tahunan
+-- 2. Gabungkan data dan hitung rasio bobot target mingguan terhadap tahunan secara horizontal
 matrix_base AS (
     SELECT 
         t.channel, t.year, t.period::text AS period, t.periodname, t.week,
@@ -63,7 +63,7 @@ matrix_base AS (
         COALESCE(a.salfo_qty, 0) AS salfo_qty,
         COALESCE(a.salfo_value, 0) AS salfo_value,
         
-        -- HITUNG RASIO BOBOT TARGET (Mencegah pembagian dengan nol jika target tahunan kosong)
+        -- HITUNG RASIO BOBOT TARGET (Mencegah division by zero dengan CASE WHEN)
         CASE 
             WHEN COALESCE(ann.total_target_qty_year, 0) = 0 THEN 0 
             ELSE COALESCE(t.target_qty, 0) / ann.total_target_qty_year 
@@ -98,14 +98,14 @@ matrix_with_lm AS (
        AND (prev.week::numeric % 4) = (curr.week::numeric % 4)
 )
 
--- 3. FINAL SELECT UNPIVOT DENGAN KOLOM RASIO BERSIH
+-- 3. FINAL SELECT UNPIVOT DENGAN KOLOM RASIO BERSIH (AMBIL DATA SINKRON)
 SELECT 
     *, 'QTY' AS pilihan_satuan,
     target_qty AS target_value_final, 
     stm_qty AS stm_value_final, 
     salfo_qty AS salfo_value_final,
     target_qty_lm AS target_lm_final,
-    stm_lm_final AS stm_lm_final,
+    stm_qty_lm AS stm_lm_final,
     bobot_target_qty_weekly AS bobot_target_final
 FROM matrix_with_lm
 
