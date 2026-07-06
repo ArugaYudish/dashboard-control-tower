@@ -59,7 +59,7 @@ select md.sls_div as channel, cast(voswb.tahun as numeric) as year, voswb.period
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
        mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, mp.parent_id, mparent.parent_nm as parent_name,
        mp.pcode, mp.pcodename, mp.flag_season as flag_sku,
-       voswb.distributor_id, md.distributor_nm as distributorN_name, voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
+       voswb.distributor_id, md.distributor_nm as distributor_name, voswb.omsetqty as stm_qty, voswb.omsetvalue as stm_value,
        vscw.qty as salfo_qty, vscw.qty * coalesce(mpd.price,0) as salfo_value,
        ttw.target_qty, ttw.target_value, sss.qty as stock_subdist,
        ws.stock_ibn, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
