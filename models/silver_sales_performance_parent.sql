@@ -64,16 +64,16 @@ select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(omsetqty) as
 	group by a.year, a.period, a.week, a.distributor_id, a.parent_id 
 ),
 avgs as (
-  select v.distributor_id, mp.parent_id,
-         sum(v.omsetqty)   filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_qty,
-         sum(v.omsetvalue) filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_value,
-         sum(v.omsetqty)   filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_qty,
-         sum(v.omsetvalue) filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_value
-  from spx.v_omset_subdist_weekly_bw v
-  join spx.m_product mp on v.pcode = mp.pcode
+  select s.distributor_id, s.parent_id,
+         sum(s.stm_qty)   filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_qty,
+         sum(s.stm_value) filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_value,
+         sum(s.stm_qty)   filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_qty,
+         sum(s.stm_value) filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_value
+  from stm s
   join window_weeks w
-    on cast(v.tahun as int) = w.year and cast(v.week as int) = w.week
-  group by v.distributor_id, mp.parent_id
+    on s.year = w.year and s.week = w.week
+  where s.parent_id is not null
+  group by s.distributor_id, s.parent_id
 ),
 wh_stock as (
   select a.year, a.week, mp.parent_id, sum(qty) as stock_ibn
