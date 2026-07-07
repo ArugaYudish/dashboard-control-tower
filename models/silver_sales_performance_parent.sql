@@ -55,7 +55,7 @@ stock as (
 	group by a.year, a.period, a.week, a.distributor_id, a.parent_id 
 ),
 stm as (
-select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(omsetqty) as stm_qty, sum(qty_value) as stock_value
+select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(omsetqty) as stm_qty, sum(qty_value) as stm_value
 	from 
 	(
 	select cast(vss.tahun as int) as year, vss.periode as period, cast(vss.week as int) as week, vss.distributor_id, vss.pcode, p.parent_id, vss.omsetqty, vss.omsetvalue as qty_value
@@ -101,6 +101,7 @@ select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.per
        mp.parent_id, mparent.parent_nm as parent_name, mp.flag_season as flag_sku,
        voswb.distributor_id, md.distributor_nm as distributor_name, voswb.target_qty, voswb.target_value,
        round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
+       stm.stm_qty, stm.stm_value,
        ws.stock_ibn, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
        stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at
 from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp
@@ -114,7 +115,7 @@ join spx.v_target_weekly_by_parent voswb on mp.parent_id = voswb.parent_id
 join cycle_ranked cr on voswb.year = cr.year and voswb.week = cr.week
 join spx.m_distributor md on voswb.distributor_id = md.distributor_id
 left join sales_hierarchy vsh on voswb.distributor_id = vsh.distributor_id and voswb.parent_id = vsh.parent_id
-left join stm on voswb.year = stm.year and voswb.week = stm.week and voswb.parent_id = stm.parent_id
+left join stm on voswb.year = stm.year and voswb.week = stm.week and voswb.distributor_id = stm.distributor_id and voswb.parent_id = stm.parent_id
 left join salfo on voswb.year = salfo.year and voswb.week = salfo.week and voswb.distributor_id = salfo.distributor_id and voswb.parent_id = salfo.parent_id
 left join stock on voswb.year = stock.year and voswb.week = stock.week and voswb.distributor_id = stock.distributor_id and voswb.parent_id = stock.parent_id
 left join wh_stock ws
