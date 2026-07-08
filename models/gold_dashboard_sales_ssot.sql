@@ -23,7 +23,7 @@ base_with_op AS (
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
         CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
-        -- Kolom Helper: Mengunci Target Bulan Lalu secara Otomatis
+        -- 🔑 Kolom Helper Baru: Mengunci Target Bulan Lalu secara Otomatis
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
@@ -51,7 +51,7 @@ matrix_core AS (
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
         COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
-        COALESCE(k.ytd_sales_helper_val, 0) AS ytd_sales_helper_val
+        COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
     FROM base_with_op b
     LEFT JOIN kuncian_global k ON b.year = k.year AND b.channel = k.channel
 ),
@@ -88,7 +88,7 @@ matrix_with_ly_and_lm AS (
         
         -- Pembanding Last Month (LM) - Mundur 1 Period secara Dinamis
         COALESCE(lm.target_qty_lm_raw, 0) AS target_qty_lm,
-        COALESCE(lm.target_value_lm_raw, 0) AS target_value_lm,
+        COALESCE(lm.target_val_lm_raw, 0) AS target_value_lm,
         COALESCE(lm.stm_qty_lm_raw, 0) AS stm_qty_lm,
         COALESCE(lm.stm_value_lm_raw, 0) AS stm_value_lm,
         COALESCE(lm.salfo_qty_lm_raw, 0) AS salfo_qty_lm,
@@ -110,7 +110,7 @@ matrix_with_ly_and_lm AS (
 )
 
 -- =========================================================================
--- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET) - SEMUA KOLOM KELUAR!
+-- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET)
 -- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
@@ -122,10 +122,6 @@ SELECT
     op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'QTY' AS pilihan_satuan,
-    
-    -- 🔑 Kuncian Urutan Filter: Current Period dikasih nilai 1, sisanya 2
-    CASE WHEN period = op_current_period THEN 1 ELSE 2 END AS urutan_filter_period,
-
     target_qty AS target_weekly,
     salfo_qty AS salfo_weekly,
     stm_qty AS stm_weekly,
@@ -152,7 +148,10 @@ SELECT
     salfo_qty_ly AS salfo_weekly_ly,
     
     target_year_helper_qty AS target_full_year_statis,
-    ytd_sales_helper_qty AS ytd_sales_statis
+    ytd_sales_helper_qty AS ytd_sales_statis,
+
+    -- 🔑 TAMBAHAN KOLOM BARU DI UJUNG BIAR AMAN: Penentu Urutan Filter Superset
+    CASE WHEN period = op_current_period THEN 1 ELSE 2 END AS urutan_filter_period
 FROM matrix_with_ly_and_lm
 
 UNION ALL
@@ -166,10 +165,6 @@ SELECT
     op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'VALUE' AS pilihan_satuan,
-    
-    -- 🔑 Kuncian Urutan Filter: Current Period dikasih nilai 1, sisanya 2
-    CASE WHEN period = op_current_period THEN 1 ELSE 2 END AS urutan_filter_period,
-
     target_value AS target_weekly,
     salfo_value AS salfo_weekly,
     stm_value AS stm_weekly,
@@ -196,5 +191,8 @@ SELECT
     salfo_value_ly AS salfo_weekly_ly,
     
     target_year_helper_val AS target_full_year_statis,
-    ytd_sales_helper_val AS ytd_sales_statis
+    ytd_sales_helper_val AS ytd_sales_statis,
+
+    -- 🔑 TAMBAHAN KOLOM BARU DI UJUNG BIAR AMAN: Penentu Urutan Filter Superset
+    CASE WHEN period = op_current_period THEN 1 ELSE 2 END AS urutan_filter_period
 FROM matrix_with_ly_and_lm
