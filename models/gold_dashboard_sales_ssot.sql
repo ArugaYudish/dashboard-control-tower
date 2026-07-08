@@ -22,7 +22,9 @@ base_with_op AS (
         c.cur_year AS op_current_year,
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
-        CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc
+        CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
+        -- 🔑 Kolom Helper Baru: Mengunci Target Bulan Lalu secara Otomatis
+        CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
 ),
@@ -33,7 +35,7 @@ base_with_op AS (
 kuncian_global AS (
     SELECT 
         year, channel,
-        -- Kunci Target Setahun Penuh Murni per Channel
+        -- Kunci Target Setahun Penuh Murni per Channel (Untuk Kuncian Mati Card 6)
         SUM(target_qty) AS target_qty_full_year,
         SUM(target_value) AS target_val_full_year,
         -- Kunci Aktual Penjualan YTD (Awal tahun s/d Operational Week)
@@ -71,12 +73,12 @@ kuncian_bulanan AS (
 ),
 
 -- =========================================================================
--- ⚡ STEP HORIZONTAL JOIN: Menjajarkan Data LY (Tahun Lalu) & LM (Bulan Lalu)
+-- ⚡ STEP HORIZONTAL JOIN: Menjajarkan Data LY & LM
 -- =========================================================================
 matrix_with_ly_and_lm AS (
     SELECT 
         curr.*,
-        -- Pembanding Tahun Lalu (LY) - Apple to Apple Match Week
+        -- Pembanding Tahun Lalu (LY)
         COALESCE(ly.stm_qty, 0) AS stm_qty_ly,
         COALESCE(ly.stm_value, 0) AS stm_value_ly,
         COALESCE(ly.salfo_qty, 0) AS salfo_qty_ly,
@@ -84,7 +86,7 @@ matrix_with_ly_and_lm AS (
         COALESCE(ly.target_qty, 0) AS target_qty_ly,
         COALESCE(ly.target_value, 0) AS target_value_ly,
         
-        -- 🔑 Pembanding Last Month (LM) - Dinamis Bergeser Mundur 1 Period (period - 1)
+        -- Pembanding Last Month (LM) - Mundur 1 Period secara Dinamis
         COALESCE(lm.target_qty_lm_raw, 0) AS target_qty_lm,
         COALESCE(lm.target_val_lm_raw, 0) AS target_value_lm,
         COALESCE(lm.stm_qty_lm_raw, 0) AS stm_qty_lm,
@@ -92,7 +94,6 @@ matrix_with_ly_and_lm AS (
         COALESCE(lm.salfo_qty_lm_raw, 0) AS salfo_qty_lm,
         COALESCE(lm.salfo_value_lm_raw, 0) AS salfo_value_lm
     FROM matrix_core curr
-    -- Join LY (Mundur 1 Tahun, tapi week dan period disamakan)
     LEFT JOIN matrix_core ly
         ON ly.channel = curr.channel
        AND ly.distributor_id = curr.distributor_id
@@ -100,7 +101,6 @@ matrix_with_ly_and_lm AS (
        AND ly.year = (curr.year - 1)
        AND ly.period = curr.period
        AND ly.week = curr.week
-    -- 🔑 Join LM (Mengambil totalitas akumulasi period sebelumnya dari kuncian_bulanan)
     LEFT JOIN kuncian_bulanan lm
         ON lm.channel = curr.channel
        AND lm.distributor_id = curr.distributor_id
@@ -110,7 +110,7 @@ matrix_with_ly_and_lm AS (
 )
 
 -- =========================================================================
--- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET) - SEMUA KOLOM KELUAR!
+-- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET)
 -- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
@@ -119,10 +119,9 @@ SELECT
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     flag_sku, distributor_id, distributor_name, loaded_at,
-    op_current_year, op_current_period, op_current_week, is_ytd_calc,
+    op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'QTY' AS pilihan_satuan,
-    -- Kolom Transaksi Dinamis Mingguan Berjalan
     target_qty AS target_weekly,
     salfo_qty AS salfo_weekly,
     stm_qty AS stm_weekly,
@@ -140,17 +139,14 @@ SELECT
     avg_5w_sta_qty AS avg_5w_sta,
     avg_5w_sta_value AS avg_5w_sta_value_raw,
     
-    -- 🔑 Kolom Pembanding Last Month (LM) QTY
     target_qty_lm AS target_weekly_lm,
     stm_qty_lm AS stm_weekly_lm,
     salfo_qty_lm AS salfo_weekly_lm,
     
-    -- Kolom Pembanding Tahun Lalu (Horizontal LY)
     target_qty_ly AS target_weekly_ly,
     stm_qty_ly AS stm_weekly_ly,
     salfo_qty_ly AS salfo_weekly_ly,
     
-    -- Kolom Kuncian Statis Akhir Tahun Per Channel (Kunci Mati Card 6)
     target_year_helper_qty AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis
 FROM matrix_with_ly_and_lm
@@ -163,10 +159,9 @@ SELECT
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
     flag_sku, distributor_id, distributor_name, loaded_at,
-    op_current_year, op_current_period, op_current_week, is_ytd_calc,
+    op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'VALUE' AS pilihan_satuan,
-    -- Kolom Transaksi Dinamis Mingguan Berjalan
     target_value AS target_weekly,
     salfo_value AS salfo_weekly,
     stm_value AS stm_weekly,
@@ -184,17 +179,14 @@ SELECT
     avg_5w_sta_value AS avg_5w_sta,
     avg_5w_sta_value AS avg_5w_sta_value_raw,
     
-    -- 🔑 Kolom Pembanding Last Month (LM) VALUE
     target_value_lm AS target_weekly_lm,
     stm_value_lm AS stm_weekly_lm,
     salfo_value_lm AS salfo_weekly_lm,
     
-    -- Kolom Pembanding Tahun Lalu (Horizontal LY)
     target_value_ly AS target_weekly_ly,
     stm_value_ly AS stm_weekly_ly,
     salfo_value_ly AS salfo_weekly_ly,
     
-    -- Kolom Kuncian Statis Akhir Tahun Per Channel (Kunci Mati Card 6)
     target_year_helper_val AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis
 FROM matrix_with_ly_and_lm
