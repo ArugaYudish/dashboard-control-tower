@@ -23,7 +23,7 @@ base_with_op AS (
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
         CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
-        -- Kolom Helper: Mengunci Target Bulan Lalu secara Otomatis
+        -- Kolom Helper Baru: Mengunci Target Bulan Lalu secara Otomatis
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
@@ -49,7 +49,8 @@ matrix_core AS (
     SELECT 
         b.*,
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
-        COALESCE(k.target_year_helper_val, 0) AS target_year_helper_val,
+        -- 🔑 FIX TYPO DI SINI: Murni diarahkan ke target_val_full_year dari kuncian_global tanpa mengubah nama output columns target_year_helper_val lu!
+        COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
         COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
         COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
     FROM base_with_op b
@@ -150,7 +151,7 @@ SELECT
     target_year_helper_qty AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis,
 
-    -- 🔑 KOLOM BARU DI UJUNG DENGAN CASTING NUMERIC AKURAT
+    -- 🔑 Tambahan kolom baru di paling bawah dengan casting numeric akurat (Existing aman!)
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week
 FROM matrix_with_ly_and_lm
@@ -194,7 +195,7 @@ SELECT
     target_year_helper_val AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis,
 
-    -- 🔑 KOLOM BARU DI UJUNG DENGAN CASTING NUMERIC AKURAT
+    -- 🔑 Tambahan kolom baru di paling bawah dengan casting numeric akurat (Existing aman!)
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week
 FROM matrix_with_ly_and_lm
