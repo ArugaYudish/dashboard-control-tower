@@ -1,5 +1,3 @@
-{{ config(materialized='table') }}
-
 with cycle_ranked as (
   select year, week, period,
          min(cdate) as week_start,
@@ -76,9 +74,14 @@ avgs as (
   group by s.distributor_id, s.parent_id
 ),
 wh_stock as (
-  select a.year, a.week, mp.parent_id, sum(qty) as stock_ibn
+   select a.year, a.week, a.parent_id, SUM(a.qty) as stock_ibn, SUM(a.qty_value) as stock_ibn_value 
+  from 
+  (
+  select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty, (a.qty * coalesce(mpd.price,0)) as qty_value
   from spx.t_stock_wh a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
-  group by a.year, a.week, mp.parent_id
+     left join spx.m_price_divisi mpd on a.year = mpd.year and mp.sls_div = mpd.sls_div and a.pcode = mp.pcode
+  ) a   
+  group by a.year, a.week, a.parent_id
 ),
 omset_ibn as (
   select a.year, a.week, mp.parent_id, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
@@ -94,6 +97,19 @@ avgs_ibn as (
   join window_weeks w
     on oi.year = w.year and oi.week = w.week
   group by oi.parent_id, oi.distributor_id
+),
+fdos as
+(
+  SELECT a.year, a.period, a.week, a.distributor_id, a.parent_id, SUM(a.fdos_update) as fdos_update, SUM(a.fdos_value) as fdos_value
+  FROM ( 
+select vfu.year, vfu.period, vfu.week, vfu.distributor_id, mp.pcode, mp.parent_id, vfu.fdos_update, vfu.fdos_update * coalesce(mpd.price,0) as fdos_value 
+   from spx.v_fdos_update vfu 
+ 	inner join cycle_ranked cw on vfu.year = cw.year and vfu.period = cw.period and vfu.week = cw.week
+	inner join spx.m_product mp on vfu.pcode = mp.pcode
+  inner join spx.m_distributor md on vfu.distributor_id = md.distributor_id
+  left join spx.m_price_divisi mpd on vfu.pcode = mpd.pcode and vfu.year = mpd.year and md.sls_div = mpd.sls_div
+ ) a
+ GROUP BY a.year, a.period, a.week, a.distributor_id, a.parent_id
 )
 select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName,voswb.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
@@ -102,7 +118,7 @@ select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.per
        voswb.distributor_id, md.distributor_nm as distributor_name, voswb.target_qty, voswb.target_value,
        round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
        stm.stm_qty, stm.stm_value,
-       ws.stock_ibn, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
+       ws.stock_ibn, ws.stock_ibn_value, fdos.fdos_update, fdos.fdos_value, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
        stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at
 from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp
 left join spx.m_division mdiv on mdiv.div_id = mp.div_id
@@ -118,6 +134,7 @@ left join sales_hierarchy vsh on voswb.distributor_id = vsh.distributor_id and v
 left join stm on voswb.year = stm.year and voswb.week = stm.week and voswb.distributor_id = stm.distributor_id and voswb.parent_id = stm.parent_id
 left join salfo on voswb.year = salfo.year and voswb.week = salfo.week and voswb.distributor_id = salfo.distributor_id and voswb.parent_id = salfo.parent_id
 left join stock on voswb.year = stock.year and voswb.week = stock.week and voswb.distributor_id = stock.distributor_id and voswb.parent_id = stock.parent_id
+left join fdos on voswb.year = fdos.year and voswb.week = fdos.week and voswb.distributor_id = fdos.distributor_id and voswb.parent_id = fdos.parent_id
 left join wh_stock ws
   on voswb.year = ws.year and voswb.week = ws.week and voswb.parent_id = ws.parent_id
 left join omset_ibn oi
