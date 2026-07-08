@@ -55,12 +55,28 @@ matrix_core AS (
 ),
 
 -- =========================================================================
--- ⚡ STEP HORIZONTAL LAST YEAR & LAST MONTH: Menjajarkan Data ke Samping Row
+-- ⚡ STEP KUNCIAN BULANAN: Agregasi Volume Bulanan Murni untuk Base Last Month
+-- =========================================================================
+kuncian_bulanan AS (
+    SELECT 
+        year, period, channel, distributor_id, parent_id,
+        SUM(target_qty) AS target_qty_lm_raw,
+        SUM(target_value) AS target_val_lm_raw,
+        SUM(stm_qty) AS stm_qty_lm_raw,
+        SUM(stm_value) AS stm_value_lm_raw,
+        SUM(salfo_qty) AS salfo_qty_lm_raw,
+        SUM(salfo_value) AS salfo_value_lm_raw
+    FROM matrix_core
+    GROUP BY year, period, channel, distributor_id, parent_id
+),
+
+-- =========================================================================
+-- ⚡ STEP HORIZONTAL JOIN: Menjajarkan Data LY (Tahun Lalu) & LM (Bulan Lalu)
 -- =========================================================================
 matrix_with_ly_and_lm AS (
     SELECT 
         curr.*,
-        -- Pembanding Tahun Lalu (LY)
+        -- Pembanding Tahun Lalu (LY) - Apple to Apple Match Week
         COALESCE(ly.stm_qty, 0) AS stm_qty_ly,
         COALESCE(ly.stm_value, 0) AS stm_value_ly,
         COALESCE(ly.salfo_qty, 0) AS salfo_qty_ly,
@@ -68,15 +84,15 @@ matrix_with_ly_and_lm AS (
         COALESCE(ly.target_qty, 0) AS target_qty_ly,
         COALESCE(ly.target_value, 0) AS target_value_ly,
         
-        -- 🔑 Tambahan Kuncian Horizontal Last Month (LM) untuk Chart 4
-        COALESCE(lm.target_qty, 0) AS target_qty_lm,
-        COALESCE(lm.target_value, 0) AS target_value_lm,
-        COALESCE(lm.stm_qty, 0) AS stm_qty_lm,
-        COALESCE(lm.stm_value, 0) AS stm_value_lm,
-        COALESCE(lm.salfo_qty, 0) AS salfo_qty_lm,
-        COALESCE(lm.salfo_value, 0) AS salfo_value_lm
+        -- 🔑 Pembanding Last Month (LM) - Dinamis Bergeser Mundur 1 Period (period - 1)
+        COALESCE(lm.target_qty_lm_raw, 0) AS target_qty_lm,
+        COALESCE(lm.target_val_lm_raw, 0) AS target_value_lm,
+        COALESCE(lm.stm_qty_lm_raw, 0) AS stm_qty_lm,
+        COALESCE(lm.stm_value_lm_raw, 0) AS stm_value_lm,
+        COALESCE(lm.salfo_qty_lm_raw, 0) AS salfo_qty_lm,
+        COALESCE(lm.salfo_value_lm_raw, 0) AS salfo_value_lm
     FROM matrix_core curr
-    -- Join Tahun Lalu
+    -- Join LY (Mundur 1 Tahun, tapi week dan period disamakan)
     LEFT JOIN matrix_core ly
         ON ly.channel = curr.channel
        AND ly.distributor_id = curr.distributor_id
@@ -84,21 +100,20 @@ matrix_with_ly_and_lm AS (
        AND ly.year = (curr.year - 1)
        AND ly.period = curr.period
        AND ly.week = curr.week
-    -- 🔑 Join Bulan/Period Lalu (Mundur 1 Period di Tahun yang Sama)
-    LEFT JOIN matrix_core lm
+    -- 🔑 Join LM (Mengambil totalitas akumulasi period sebelumnya dari kuncian_bulanan)
+    LEFT JOIN kuncian_bulanan lm
         ON lm.channel = curr.channel
        AND lm.distributor_id = curr.distributor_id
        AND lm.parent_id = curr.parent_id
        AND lm.year = curr.year
        AND lm.period = (curr.period - 1)
-       AND lm.week = curr.week
 )
 
 -- =========================================================================
 -- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET) - SEMUA KOLOM KELUAR!
 -- =========================================================================
 
--- 🔵 BLOK QTY
+-- 🔵 1. BLOK DATA QTY
 SELECT 
     channel, year, period, periodname, week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -142,7 +157,7 @@ FROM matrix_with_ly_and_lm
 
 UNION ALL
 
--- 🟢 BLOK VALUE
+-- 🟢 2. BLOK DATA VALUE
 SELECT 
     channel, year, period, periodname, week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
