@@ -23,7 +23,7 @@ base_with_op AS (
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
         CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
-        -- Kolom Helper Baru: Mengunci Target Bulan Lalu secara Otomatis
+        -- Kolom Helper: Mengunci Target Bulan Lalu secara Otomatis
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
@@ -45,16 +45,29 @@ kuncian_global AS (
     GROUP BY year, channel
 ),
 
-matrix_core AS (
+-- =========================================================================
+-- 🔑 STEP AKUMULASI SEJATI (WINDOW FUNCTION YTD CUMULATIVE)
+-- =========================================================================
+matrix_cumulative AS (
     SELECT 
         b.*,
+        -- Mengakumulasikan data dari Week 1 s/d Week berjalan secara presisi per segmen
+        SUM(b.target_qty) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS target_qty_ytd_cum,
+        SUM(b.target_value) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS target_val_ytd_cum,
+        SUM(b.stm_qty) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS stm_qty_ytd_cum,
+        SUM(b.stm_value) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS stm_val_ytd_cum
+    FROM base_with_op b
+),
+
+matrix_core AS (
+    SELECT 
+        mc.*,
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
-        -- 🔑 FIX TYPO DI SINI: Murni diarahkan ke target_val_full_year dari kuncian_global tanpa mengubah nama output columns target_year_helper_val lu!
         COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
         COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
         COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
-    FROM base_with_op b
-    LEFT JOIN kuncian_global k ON b.year = k.year AND b.channel = k.channel
+    FROM matrix_cumulative mc
+    LEFT JOIN kuncian_global k ON mc.year = k.year AND mc.channel = k.channel
 ),
 
 -- =========================================================================
@@ -151,9 +164,12 @@ SELECT
     target_year_helper_qty AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis,
 
-    -- 🔑 Tambahan kolom baru di paling bawah dengan casting numeric akurat (Existing aman!)
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week
+    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+
+    -- 💎 KOLOM DATA MATENG BARU: Akumulatif YTD Sejati
+    target_qty_ytd_cum AS target_ytd_mateng,
+    stm_qty_ytd_cum AS stm_ytd_mateng
 FROM matrix_with_ly_and_lm
 
 UNION ALL
@@ -195,7 +211,10 @@ SELECT
     target_year_helper_val AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis,
 
-    -- 🔑 Tambahan kolom baru di paling bawah dengan casting numeric akurat (Existing aman!)
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week
+    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+
+    -- 💎 KOLOM DATA MATENG BARU: Akumulatif YTD Sejati
+    target_val_ytd_cum AS target_ytd_mateng,
+    stm_val_ytd_cum AS stm_ytd_mateng
 FROM matrix_with_ly_and_lm
