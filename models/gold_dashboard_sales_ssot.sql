@@ -80,7 +80,6 @@ matrix_with_ly AS (
 -- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET) - SEMUA KOLOM KELUAR!
 -- =========================================================================
 
--- 🔵 BLOK QTY
 SELECT 
     channel, year, period, periodname, week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -89,12 +88,11 @@ SELECT
     op_current_year, op_current_period, op_current_week, is_ytd_calc,
     
     'QTY' AS pilihan_satuan,
-    -- Kolom Transaksi Dinamis Mingguan Berjalan
     target_qty AS target_weekly,
     salfo_qty AS salfo_weekly,
     stm_qty AS stm_weekly,
     stock_ibn AS stock_ibn,
-    stock_ibn_value AS stock_ibn_value_raw, -- Tetap dikeluarkan untuk kelengkapan data
+    stock_ibn_value AS stock_ibn_value_raw,
     fdos_update AS fdos_update,
     fdos_value AS fdos_value_raw,
     sta_qty AS sta_weekly,
@@ -107,12 +105,17 @@ SELECT
     avg_5w_sta_qty AS avg_5w_sta,
     avg_5w_sta_value AS avg_5w_sta_value_raw,
     
-    -- Kolom Pembanding Tahun Lalu (Horizontal LY)
+    -- ➕ SEKARANG KITA MASUKKAN PEMBANDING LAST MONTH (LM) DI SINI, JIR!
+    target_qty_lm AS target_weekly_lm,
+    stm_qty_lm AS stm_weekly_lm,
+    salfo_qty_lm AS salfo_weekly_lm,
+    
+    -- Pembanding Tahun Lalu (Horizontal LY)
     target_qty_ly AS target_weekly_ly,
     stm_qty_ly AS stm_weekly_ly,
     salfo_qty_ly AS salfo_weekly_ly,
     
-    -- Kolom Kuncian Statis Akhir Tahun Per Channel (Kunci Mati Card 6)
+    -- Kuncian Statis untuk Card 6 (Full Year)
     target_year_helper_qty AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis
 FROM matrix_with_ly
@@ -128,7 +131,6 @@ SELECT
     op_current_year, op_current_period, op_current_week, is_ytd_calc,
     
     'VALUE' AS pilihan_satuan,
-    -- Kolom Transaksi Dinamis Mingguan Berjalan
     target_value AS target_weekly,
     salfo_value AS salfo_weekly,
     stm_value AS stm_weekly,
@@ -146,12 +148,17 @@ SELECT
     avg_5w_sta_value AS avg_5w_sta,
     avg_5w_sta_value AS avg_5w_sta_value_raw,
     
-    -- Kolom Pembanding Tahun Lalu (Horizontal LY)
+    -- ➕ SEKARANG KITA MASUKKAN PEMBANDING LAST MONTH (LM) DI SINI JUGA!
+    target_value_lm AS target_weekly_lm,
+    stm_value_lm AS stm_weekly_lm,
+    salfo_value_lm AS salfo_weekly_lm,
+    
+    -- Pembanding Tahun Lalu (Horizontal LY)
     target_value_ly AS target_weekly_ly,
     stm_value_ly AS stm_weekly_ly,
     salfo_value_ly AS salfo_weekly_ly,
     
-    -- Kolom Kuncian Statis Akhir Tahun Per Channel (Kunci Mati Card 6)
+    -- Kuncian Statis untuk Card 6 (Full Year)
     target_year_helper_val AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis
 FROM matrix_with_ly
