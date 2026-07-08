@@ -1,3 +1,5 @@
+{{ config(materialized='table') }}
+
 with cycle_ranked as (
   select year, week, period,
          min(cdate) as week_start,
