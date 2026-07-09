@@ -16,65 +16,86 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
-base_data AS (
+-- 1. Ambil list kombinasi Year dan Week yang valid secara dinamis dari Silver
+all_weeks AS (
+    SELECT DISTINCT 
+        year AS spine_year,
+        week::numeric AS spine_week 
+    FROM spx.silver_sales_performance_parent 
+    WHERE week IS NOT NULL
+),
+
+-- 2. Ambil master filter lengkap per tahun secara dinamis
+distinct_combos AS (
+    SELECT DISTINCT
+        channel, year, period, periodname,
+        nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
+        sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
+        flag_sku, distributor_id, distributor_name
+    FROM spx.silver_sales_performance_parent
+),
+
+-- 3. Tiup Backbone Grid Multi-Year Dinamis: Dikunci berpasangan berdasarkan kolom YEAR
+spine AS (
+    SELECT c.*, w.spine_week
+    FROM distinct_combos c
+    INNER JOIN all_weeks w 
+        ON c.year = w.spine_year
+),
+
+-- 4. Tempelkan jualan riil Silver ke atas tulang punggung matriks hantu multi-year
+joined_data AS (
     SELECT 
         s.*,
+        COALESCE(actual.target_qty, 0) AS target_qty_raw,
+        COALESCE(actual.stm_qty, 0) AS stm_qty_raw,
+        COALESCE(actual.target_value, 0) AS target_val_raw,
+        COALESCE(actual.stm_value, 0) AS stm_val_raw,
         c.cur_year AS op_current_year,
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
-        CASE WHEN s.week::numeric <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
+        CASE WHEN s.spine_week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
-    FROM spx.silver_sales_performance_parent s
+    FROM spine s
+    LEFT JOIN spx.silver_sales_performance_parent actual
+        ON s.channel = actual.channel 
+       AND s.year = actual.year 
+       AND s.spine_week = actual.week::numeric
+       AND s.sbu_id = actual.sbu_id 
+       AND s.parent_id = actual.parent_id 
+       AND s.brand_id = actual.brand_id 
+       AND s.subbrand_id = actual.subbrand_id 
+       AND s.flag_sku = actual.flag_sku 
+       AND s.distributor_id = actual.distributor_id
+       AND s.ss_id = actual.ss_id 
+       AND s.rsm_id = actual.rsm_id
     CROSS JOIN current_operational c
-    WHERE s.week IS NOT NULL
 ),
 
--- STEP 2: Gulung nilai dengan casting numeric presisi tinggi demi mencegah distorsi desimal
-matrix_cumulative_raw AS (
-    SELECT 
-        bd.*,
-        SUM(bd.target_qty::numeric(20,4)) OVER (
-            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
-            ORDER BY bd.week::numeric
-        ) AS target_qty_ytd_raw,
-        SUM(bd.stm_qty::numeric(20,4)) OVER (
-            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
-            ORDER BY bd.week::numeric
-        ) AS stm_qty_ytd_raw,
-        SUM(bd.target_value::numeric(20,4)) OVER (
-            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
-            ORDER BY bd.week::numeric
-        ) AS target_val_ytd_raw,
-        SUM(bd.stm_value::numeric(20,4)) OVER (
-            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
-            ORDER BY bd.week::numeric
-        ) AS stm_val_ytd_raw
-    FROM base_data bd
-),
-
--- STEP 3: Backfilling rolling max frame agar baris minggu berjalan membawa nilai akumulasi utuh
+-- 5. Gulung incremental per tahun dan per entitas filter lengkap tanpa ada sekat bolong
 matrix_cumulative AS (
     SELECT 
-        r.*,
-        MAX(r.target_qty_ytd_raw) OVER (
-            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        j.*,
+        SUM(j.target_qty_raw::numeric(20,4)) OVER (
+            PARTITION BY j.channel, j.year, j.sbu_id, j.parent_id, j.brand_id, j.subbrand_id, j.flag_sku, j.distributor_id, j.rsm_id, j.ss_id
+            ORDER BY j.spine_week
         ) AS target_qty_ytd_cum,
-        MAX(r.stm_qty_ytd_raw) OVER (
-            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        SUM(j.stm_qty_raw::numeric(20,4)) OVER (
+            PARTITION BY j.channel, j.year, j.sbu_id, j.parent_id, j.brand_id, j.subbrand_id, j.flag_sku, j.distributor_id, j.rsm_id, j.ss_id
+            ORDER BY j.spine_week
         ) AS stm_qty_ytd_cum,
-        MAX(r.target_val_ytd_raw) OVER (
-            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        SUM(j.target_val_raw::numeric(20,4)) OVER (
+            PARTITION BY j.channel, j.year, j.sbu_id, j.parent_id, j.brand_id, j.subbrand_id, j.flag_sku, j.distributor_id, j.rsm_id, j.ss_id
+            ORDER BY j.spine_week
         ) AS target_val_ytd_cum,
-        MAX(r.stm_val_ytd_raw) OVER (
-            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        SUM(j.stm_val_raw::numeric(20,4)) OVER (
+            PARTITION BY j.channel, j.year, j.sbu_id, j.parent_id, j.brand_id, j.subbrand_id, j.flag_sku, j.distributor_id, j.rsm_id, j.ss_id
+            ORDER BY j.spine_week
         ) AS stm_val_ytd_cum
-    FROM matrix_cumulative_raw r
+    FROM joined_data j
 ),
 
+-- 6. Helper Target Setahun Penuh (Dinamis per Tahun)
 matrix_core AS (
     SELECT 
         mc.*,
@@ -83,14 +104,15 @@ matrix_core AS (
     FROM matrix_cumulative mc
     LEFT JOIN (
         SELECT 
-            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id,
+            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, rsm_id, ss_id,
             SUM(target_qty::numeric(20,4)) AS target_qty_full_year,
             SUM(target_value::numeric(20,4)) AS target_val_full_year
-        FROM base_data
-        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id
+        FROM spx.silver_sales_performance_parent
+        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, rsm_id, ss_id
     ) t ON mc.year = t.year AND mc.channel = t.channel AND mc.sbu_id = t.sbu_id AND mc.parent_id = t.parent_id 
        AND mc.brand_id = t.brand_id AND mc.subbrand_id = t.subbrand_id AND mc.flag_sku = t.flag_sku 
-       AND mc.distributor_id = t.distributor_id
+       AND mc.distributor_id = t.distributor_id AND mc.nsm_id = t.nsm_id AND mc.grsm_id = t.grsm_id 
+       AND mc.rsm_id = t.rsm_id AND mc.ss_id = t.ss_id
 )
 
 -- =========================================================================
@@ -99,29 +121,29 @@ matrix_core AS (
 
 -- 🔵 1. BLOK DATA QTY
 SELECT 
-    channel, year, period, periodname, week,
+    channel, year, period, periodname, spine_week AS week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
-    flag_sku, distributor_id, distributor_name, loaded_at,
+    flag_sku, distributor_id, distributor_name, NOW() AS loaded_at,
     op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'QTY' AS pilihan_satuan,
-    target_qty AS target_weekly,
-    salfo_qty AS salfo_weekly,
-    stm_qty AS stm_weekly,
-    stock_ibn AS stock_ibn,
-    stock_ibn_value AS stock_ibn_value_raw,
-    fdos_update AS fdos_update,
-    fdos_value AS fdos_value_raw,
-    sta_qty AS sta_weekly,
-    stock_qty AS stock_weekly,
-    stock_value AS stock_value_raw,
-    avg_5w_qty AS avg_5w,
-    avg_5w_value AS avg_5w_value_raw,
-    avg_13w_qty AS avg_13w,
-    avg_13w_value AS avg_13w_value_raw,
-    avg_5w_sta_qty AS avg_5w_sta,
-    avg_5w_sta_value AS avg_5w_sta_value_raw,
+    target_qty_raw AS target_weekly,
+    0 AS salfo_weekly, 
+    stm_qty_raw AS stm_weekly,
+    0 AS stock_ibn,
+    0 AS stock_ibn_value_raw,
+    0 AS fdos_update,
+    0 AS fdos_value_raw,
+    0 AS sta_weekly,
+    0 AS stock_qty,
+    0 AS stock_value_raw,
+    0 AS avg_5w,
+    0 AS avg_5w_value_raw,
+    0 AS avg_13w,
+    0 AS avg_13w_value_raw,
+    0 AS avg_5w_sta,
+    0 AS avg_5w_sta_value_raw,
     
     0 AS target_weekly_lm,
     0 AS stm_weekly_lm,
@@ -134,9 +156,8 @@ SELECT
     0 AS ytd_sales_statis,
 
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+    CASE WHEN spine_week = op_current_week THEN 0 ELSE spine_week END AS urutan_filter_week,
 
-    -- Mengembalikan ransel akumulasi mateng sejati ke Superset
     target_qty_ytd_cum AS target_ytd_mateng,
     stm_qty_ytd_cum AS stm_ytd_mateng
 FROM matrix_core
@@ -145,29 +166,29 @@ UNION ALL
 
 -- 🟢 2. BLOK DATA VALUE
 SELECT 
-    channel, year, period, periodname, week,
+    channel, year, period, periodname, spine_week AS week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
     sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
-    flag_sku, distributor_id, distributor_name, loaded_at,
+    flag_sku, distributor_id, distributor_name, NOW() AS loaded_at,
     op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
     
     'VALUE' AS pilihan_satuan,
-    target_value AS target_weekly,
-    salfo_value AS salfo_weekly,
-    stm_value AS stm_weekly,
-    stock_ibn_value AS stock_ibn,
-    stock_ibn_value AS stock_ibn_value_raw,
-    fdos_value AS fdos_update,
-    fdos_value AS fdos_value_raw,
-    sta_value AS sta_weekly,
-    stock_qty AS stock_weekly,
-    stock_value AS stock_value_raw,
-    avg_5w_value AS avg_5w,
-    avg_5w_value AS avg_5w_value_raw,
-    avg_13w_value AS avg_13w,
-    avg_13w_value AS avg_13w_value_raw,
-    avg_5w_sta_value AS avg_5w_sta,
-    avg_5w_sta_value AS avg_5w_sta_value_raw,
+    target_val_raw AS target_weekly,
+    0 AS salfo_weekly,
+    stm_val_raw AS stm_weekly,
+    0 AS stock_ibn,
+    0 AS stock_ibn_value_raw,
+    0 AS fdos_update,
+    0 AS fdos_value_raw,
+    0 AS sta_weekly,
+    0 AS stock_qty,
+    0 AS stock_value_raw,
+    0 AS avg_5w_value AS avg_5w,
+    0 AS avg_5w_value_raw,
+    0 AS avg_13w_value AS avg_13w,
+    0 AS avg_13w_value_raw,
+    0 AS avg_5w_sta_value AS avg_5w_sta,
+    0 AS avg_5w_sta_value_raw,
     
     0 AS target_weekly_lm,
     0 AS stm_weekly_lm,
@@ -180,7 +201,7 @@ SELECT
     0 AS ytd_sales_statis,
 
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+    CASE WHEN spine_week = op_current_week THEN 0 ELSE spine_week END AS urutan_filter_week,
 
     target_val_ytd_cum AS target_ytd_mateng,
     stm_val_ytd_cum AS stm_ytd_mateng
