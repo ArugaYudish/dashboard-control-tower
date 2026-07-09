@@ -22,12 +22,17 @@ base_with_op AS (
         c.cur_year AS op_current_year,
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
-        CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
+        -- Menggunakan NULLIF + REGEXP_REPLACE agar aman dari string kosong/spasi saat casting ke numeric
+        CASE 
+            WHEN NULLIF(REGEXP_REPLACE(s.week, '\s+', '', 'g'), '')::numeric <= c.cur_week THEN 1 
+            ELSE 0 
+        END AS is_ytd_calc,
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
-    -- Proteksi awal agar baris sampah yang week-nya ga valid ga merusak urutan database
-    WHERE s.week IS NOT NULL AND s.week != '' AND s.week != '0'
+    -- Jagain di level filter utama agar row kosong atau nol ga ikut ke-load
+    WHERE NULLIF(REGEXP_REPLACE(s.week, '\s+', '', 'g'), '') IS NOT NULL 
+      AND NULLIF(REGEXP_REPLACE(s.week, '\s+', '', 'g'), '') != '0'
 ),
 
 -- =========================================================================
@@ -38,8 +43,8 @@ kuncian_global AS (
         year, channel,
         SUM(target_qty) AS target_qty_full_year,
         SUM(target_value) AS target_val_full_year,
-        SUM(CASE WHEN week <= op_current_week THEN stm_qty + salfo_qty ELSE 0 END) AS ytd_sales_qty_pure,
-        SUM(CASE WHEN week <= op_current_week THEN stm_value + salfo_value ELSE 0 END) AS ytd_sales_val_pure
+        SUM(CASE WHEN NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric <= op_current_week THEN stm_qty + salfo_qty ELSE 0 END) AS ytd_sales_qty_pure,
+        SUM(CASE WHEN NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric <= op_current_week THEN stm_value + salfo_value ELSE 0 END) AS ytd_sales_val_pure
     FROM base_with_op
     GROUP BY year, channel
 ),
@@ -55,28 +60,28 @@ matrix_cumulative AS (
             PARTITION BY 
                 b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
                 b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
-            ORDER BY b.week::numeric
+            ORDER BY NULLIF(REGEXP_REPLACE(b.week, '\s+', '', 'g'), '')::numeric
         ) AS target_qty_ytd_cum,
         
         SUM(b.target_value) OVER (
             PARTITION BY 
                 b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
                 b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
-            ORDER BY b.week::numeric
+            ORDER BY NULLIF(REGEXP_REPLACE(b.week, '\s+', '', 'g'), '')::numeric
         ) AS target_val_ytd_cum,
         
         SUM(b.stm_qty) OVER (
             PARTITION BY 
                 b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
                 b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
-            ORDER BY b.week::numeric
+            ORDER BY NULLIF(REGEXP_REPLACE(b.week, '\s+', '', 'g'), '')::numeric
         ) AS stm_qty_ytd_cum,
         
         SUM(b.stm_value) OVER (
             PARTITION BY 
                 b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
                 b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
-            ORDER BY b.week::numeric
+            ORDER BY NULLIF(REGEXP_REPLACE(b.week, '\s+', '', 'g'), '')::numeric
         ) AS stm_val_ytd_cum
     FROM base_with_op b
 ),
@@ -86,8 +91,8 @@ matrix_core AS (
         mc.*,
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
-        COALESCE(k.ytd_sales_helper_qty, 0) AS ytd_sales_helper_qty,
-        COALESCE(k.ytd_sales_helper_val, 0) AS ytd_sales_helper_val
+        COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
+        COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
     FROM matrix_cumulative mc
     LEFT JOIN kuncian_global k ON mc.year = k.year AND mc.channel = k.channel
 ),
@@ -175,11 +180,11 @@ SELECT
     stm_qty_ly AS stm_weekly_ly,
     salfo_qty_ly AS salfo_weekly_ly,
     
-    target_year_helper_qty AS target_full_year_statis,
+    target_full_year_statis AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis,
 
-    CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+    CASE WHEN NULLIF(REGEXP_REPLACE(period, '\s+', '', 'g'), '')::numeric = op_current_period THEN 0 ELSE NULLIF(REGEXP_REPLACE(period, '\s+', '', 'g'), '')::numeric END AS urutan_filter_period,
+    CASE WHEN NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric = op_current_week THEN 0 ELSE NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric END AS urutan_filter_week,
 
     -- 💎 Kolom Mateng Hasil Kuncian Total PK
     target_qty_ytd_cum AS target_ytd_mateng,
@@ -222,11 +227,11 @@ SELECT
     stm_value_ly AS stm_weekly_ly,
     salfo_value_ly AS salfo_weekly_ly,
     
-    target_year_helper_val AS target_full_year_statis,
+    target_full_year_statis AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis,
 
-    CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
-    CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
+    CASE WHEN NULLIF(REGEXP_REPLACE(period, '\s+', '', 'g'), '')::numeric = op_current_period THEN 0 ELSE NULLIF(REGEXP_REPLACE(period, '\s+', '', 'g'), '')::numeric END AS urutan_filter_period,
+    CASE WHEN NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric = op_current_week THEN 0 ELSE NULLIF(REGEXP_REPLACE(week, '\s+', '', 'g'), '')::numeric END AS urutan_filter_week,
 
     -- 💎 Kolom Mateng Hasil Kuncian Total PK
     target_val_ytd_cum AS target_ytd_mateng,
