@@ -16,7 +16,6 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- Tarik 100% struktur murni Silver tanpa manipulasi baris sedikit pun
 base_data AS (
     SELECT 
         s.*,
@@ -30,31 +29,72 @@ base_data AS (
     WHERE s.week IS NOT NULL
 ),
 
--- Hitung helper target tahunan penuh yang dikunci super ketat sesuai unique baris aslinya
-target_annual_helper AS (
+-- STEP 2: Gulung nilai dengan casting numeric presisi tinggi demi mencegah distorsi desimal
+matrix_cumulative_raw AS (
     SELECT 
-        year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id,
-        SUM(target_qty) AS target_qty_full_year,
-        SUM(target_value) AS target_val_full_year
-    FROM base_data
-    GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id
+        bd.*,
+        SUM(bd.target_qty::numeric(20,4)) OVER (
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
+            ORDER BY bd.week::numeric
+        ) AS target_qty_ytd_raw,
+        SUM(bd.stm_qty::numeric(20,4)) OVER (
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
+            ORDER BY bd.week::numeric
+        ) AS stm_qty_ytd_raw,
+        SUM(bd.target_value::numeric(20,4)) OVER (
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
+            ORDER BY bd.week::numeric
+        ) AS target_val_ytd_raw,
+        SUM(bd.stm_value::numeric(20,4)) OVER (
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id
+            ORDER BY bd.week::numeric
+        ) AS stm_val_ytd_raw
+    FROM base_data bd
+),
+
+-- STEP 3: Backfilling rolling max frame agar baris minggu berjalan membawa nilai akumulasi utuh
+matrix_cumulative AS (
+    SELECT 
+        r.*,
+        MAX(r.target_qty_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS target_qty_ytd_cum,
+        MAX(r.stm_qty_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS stm_qty_ytd_cum,
+        MAX(r.target_val_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS target_val_ytd_cum,
+        MAX(r.stm_val_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS stm_val_ytd_cum
+    FROM matrix_cumulative_raw r
 ),
 
 matrix_core AS (
     SELECT 
-        bd.*,
+        mc.*,
         COALESCE(t.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(t.target_val_full_year, 0) AS target_year_helper_val
-    FROM base_data bd
-    LEFT JOIN target_annual_helper t 
-        ON bd.year = t.year AND bd.channel = t.channel AND bd.sbu_id = t.sbu_id AND bd.parent_id = t.parent_id 
-       AND bd.brand_id = t.brand_id AND bd.subbrand_id = t.subbrand_id AND bd.flag_sku = t.flag_sku 
-       AND bd.distributor_id = t.distributor_id AND bd.nsm_id = t.nsm_id AND bd.grsm_id = t.grsm_id 
-       AND bd.rsm_id = t.rsm_id AND bd.ss_id = t.ss_id
+    FROM matrix_cumulative mc
+    LEFT JOIN (
+        SELECT 
+            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id,
+            SUM(target_qty::numeric(20,4)) AS target_qty_full_year,
+            SUM(target_value::numeric(20,4)) AS target_val_full_year
+        FROM base_data
+        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id
+    ) t ON mc.year = t.year AND mc.channel = t.channel AND mc.sbu_id = t.sbu_id AND mc.parent_id = t.parent_id 
+       AND mc.brand_id = t.brand_id AND mc.subbrand_id = t.subbrand_id AND mc.flag_sku = t.flag_sku 
+       AND mc.distributor_id = t.distributor_id
 )
 
 -- =========================================================================
--- 🔀 UNPIVOT BLOK DATA VERTIKAL SUPERSET (100% SAMA DENGAN BARIS SILVER)
+-- 🔀 UNPIVOT BLOK DATA VERTIKAL SUPERSET
 -- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
@@ -96,9 +136,9 @@ SELECT
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
-    -- Menggunakan nilai murni mingguan untuk di-sum secara dinamis di Superset YTD
-    target_qty AS target_ytd_mateng,
-    stm_qty AS stm_ytd_mateng
+    -- Mengembalikan ransel akumulasi mateng sejati ke Superset
+    target_qty_ytd_cum AS target_ytd_mateng,
+    stm_qty_ytd_cum AS stm_ytd_mateng
 FROM matrix_core
 
 UNION ALL
@@ -142,6 +182,6 @@ SELECT
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
-    target_value AS target_ytd_mateng,
-    stm_value AS stm_ytd_mateng
+    target_val_ytd_cum AS target_ytd_mateng,
+    stm_val_ytd_cum AS stm_ytd_mateng
 FROM matrix_core
