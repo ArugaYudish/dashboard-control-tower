@@ -16,7 +16,6 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- STEP 1: Tarik seluruh data mentah dari Silver dan tempel operational cycle tanpa filter yang memotong baris
 base_data AS (
     SELECT 
         s.*,
@@ -30,49 +29,48 @@ base_data AS (
     WHERE s.week IS NOT NULL
 ),
 
--- STEP 2: Hitung YTD secara inline langsung pada baris asli dengan PARTITION BY super ketat mencakup SELURUH granul PK Silver
-matrix_cumulative AS (
+matrix_cumulative_raw AS (
     SELECT 
         bd.*,
-        -- Kuncian akumulasi target mingguan ke belakang murni per baris unit terkecil
         SUM(bd.target_qty) OVER (
-            PARTITION BY 
-                bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku,
-                bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
             ORDER BY bd.week::numeric
-        ) AS target_qty_ytd_cum,
-        
-        SUM(bd.target_value) OVER (
-            PARTITION BY 
-                bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku,
-                bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
-            ORDER BY bd.week::numeric
-        ) AS target_val_ytd_cum,
-        
+        ) AS target_qty_ytd_raw,
         SUM(bd.stm_qty) OVER (
-            PARTITION BY 
-                bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku,
-                bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
             ORDER BY bd.week::numeric
-        ) AS stm_qty_ytd_cum,
-        
+        ) AS stm_qty_ytd_raw,
+        SUM(bd.target_value) OVER (
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
+            ORDER BY bd.week::numeric
+        ) AS target_val_ytd_raw,
         SUM(bd.stm_value) OVER (
-            PARTITION BY 
-                bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku,
-                bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
+            PARTITION BY bd.channel, bd.year, bd.sbu_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id, bd.nsm_id, bd.grsm_id, bd.rsm_id, bd.ss_id
             ORDER BY bd.week::numeric
-        ) AS stm_val_ytd_cum
+        ) AS stm_val_ytd_raw
     FROM base_data bd
 ),
 
--- STEP 3: Ambil helper target tahunan penuh secara aman dari baris yang sama tanpa merusak struktur row
-target_annual_helper AS (
+matrix_cumulative AS (
     SELECT 
-        year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id,
-        SUM(target_qty) AS target_qty_full_year,
-        SUM(target_value) AS target_val_full_year
-    FROM base_data
-    GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id
+        r.*,
+        MAX(r.target_qty_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id, r.nsm_id, r.grsm_id, r.rsm_id, r.ss_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS target_qty_ytd_cum,
+        MAX(r.stm_qty_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id, r.nsm_id, r.grsm_id, r.rsm_id, r.ss_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS stm_qty_ytd_cum,
+        MAX(r.target_val_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id, r.nsm_id, r.grsm_id, r.rsm_id, r.ss_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS target_val_ytd_cum,
+        MAX(r.stm_val_ytd_raw) OVER (
+            PARTITION BY r.channel, r.year, r.sbu_id, r.parent_id, r.brand_id, r.subbrand_id, r.flag_sku, r.distributor_id, r.nsm_id, r.grsm_id, r.rsm_id, r.ss_id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS stm_val_ytd_cum
+    FROM matrix_cumulative_raw r
 ),
 
 matrix_core AS (
@@ -81,16 +79,18 @@ matrix_core AS (
         COALESCE(t.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(t.target_val_full_year, 0) AS target_year_helper_val
     FROM matrix_cumulative mc
-    LEFT JOIN target_annual_helper t 
-        ON mc.year = t.year AND mc.channel = t.channel AND mc.sbu_id = t.sbu_id AND mc.parent_id = t.parent_id 
+    LEFT JOIN (
+        SELECT 
+            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id,
+            SUM(target_qty) AS target_qty_full_year,
+            SUM(target_value) AS target_val_full_year
+        FROM base_data
+        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, nsm_id, grsm_id, rsm_id, ss_id
+    ) t ON mc.year = t.year AND mc.channel = t.channel AND mc.sbu_id = t.sbu_id AND mc.parent_id = t.parent_id 
        AND mc.brand_id = t.brand_id AND mc.subbrand_id = t.subbrand_id AND mc.flag_sku = t.flag_sku 
        AND mc.distributor_id = t.distributor_id AND mc.nsm_id = t.nsm_id AND mc.grsm_id = t.grsm_id 
        AND mc.rsm_id = t.rsm_id AND mc.ss_id = t.ss_id
 )
-
--- =========================================================================
--- 🔀 UNPIVOT BLOK DATA VERTIKAL SUPERSET (0 DISTORSI BARIS)
--- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
 SELECT 
@@ -118,7 +118,7 @@ SELECT
     avg_5w_sta_qty AS avg_5w_sta,
     avg_5w_sta_value AS avg_5w_sta_value_raw,
     
-    0 AS target_weekly_lm, -- Di-nol-kan sementara demi mengejar performance core YTD & ACV malam ini
+    0 AS target_weekly_lm,
     0 AS stm_weekly_lm,
     0 AS salfo_weekly_lm,
     0 AS target_weekly_ly,
@@ -131,7 +131,6 @@ SELECT
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
-    -- 💎 Hasil Akumulasi Murni Tanpa Kebocoran
     target_qty_ytd_cum AS target_ytd_mateng,
     stm_qty_ytd_cum AS stm_ytd_mateng
 FROM matrix_core
@@ -155,7 +154,7 @@ SELECT
     fdos_value AS fdos_update,
     fdos_value AS fdos_value_raw,
     sta_value AS sta_weekly,
-    stock_value AS stock_weekly,
+    stock_qty AS stock_weekly,
     stock_value AS stock_value_raw,
     avg_5w_value AS avg_5w,
     avg_5w_value AS avg_5w_value_raw,
