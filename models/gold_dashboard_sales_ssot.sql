@@ -26,10 +26,15 @@ full_year_target AS (
     GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, rsm_id, ss_id
 ),
 
--- 2. Gabungkan data Silver dengan helper target tahunan
+-- 2. Amankan penarikan data murni dari Silver beralias eksplisit
 base_data AS (
     SELECT 
-        s.*,
+        s.channel, s.year, s.period, s.periodname, s.week,
+        s.nsm_id, s.nsm_name, s.grsm_id, s.grsm_name, s.rsm_id, s.rsm_name, s.ss_id, s.ss_name,
+        s.sbu_id, s.sbu_name, s.brand_id, s.brand_name, s.subbrand_id, s.subbrand_name, s.parent_id, s.parent_name,
+        s.flag_sku, s.distributor_id, s.distributor_name,
+        s.target_qty, s.stm_qty, s.salfo_qty,
+        s.target_value, s.stm_value, s.salfo_value,
         COALESCE(t.target_qty_full_year, 0) AS target_qty_fy,
         COALESCE(t.target_val_full_year, 0) AS target_val_fy,
         c.cur_year AS op_current_year,
@@ -47,47 +52,47 @@ base_data AS (
 )
 
 -- =========================================================================
--- 🔀 UNPIVOT MURNI 1-TO-1 DARI SILVER (ANTI MELEDAK / RUN 5 DETIK)
+-- 🔀 UNPIVOT MURNI 1-TO-1 (ANTI AMBIGUITAS SELEKSI KOLOM)
 -- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
 SELECT 
-    channel, year, period, periodname, week::numeric AS week,
-    nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
-    sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
-    flag_sku, distributor_id, distributor_name, NOW() AS loaded_at,
-    op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
+    b.channel, b.year, b.period, b.periodname, b.week,
+    b.nsm_id, b.nsm_name, b.grsm_id, b.grsm_name, b.rsm_id, b.rsm_name, b.ss_id, b.ss_name,
+    b.sbu_id, b.sbu_name, b.brand_id, b.brand_name, b.subbrand_id, b.subbrand_name, b.parent_id, b.parent_name,
+    b.flag_sku, b.distributor_id, b.distributor_name, NOW() AS loaded_at,
+    b.op_current_year, b.op_current_period, b.op_current_week, b.is_ytd_calc, b.op_last_period,
     
     'QTY' AS pilihan_satuan,
-    target_qty AS target_weekly,
-    stm_qty AS stm_weekly,
+    b.target_qty AS target_weekly,
+    b.stm_qty AS stm_weekly,
     
-    -- Kolom pendukung LY (Last Year) untuk mode Growth YTD di plugin
-    COALESCE(stm_qty_ly, 0) AS stm_weekly_ly, 
+    -- Kolom pendukung dummy LY karena absen di Silver skema
+    0::numeric(20,4) AS stm_weekly_ly, 
     
-    -- Kolom pendukung Salfo dan Target Setahun untuk mode Est. Achievement di plugin
-    COALESCE(salfo_qty, 0) AS salfo_weekly,
-    target_qty_fy AS target_full_year_statis
-FROM base_data
+    -- Kolom pendukung Salfo riil dan Target Setahun dari skema di atas
+    b.salfo_qty AS salfo_weekly,
+    b.target_qty_fy AS target_full_year_statis
+FROM base_data b
 
 UNION ALL
 
 -- 🟢 2. BLOK DATA VALUE
 SELECT 
-    channel, year, period, periodname, week::numeric AS week,
-    nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
-    sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
-    flag_sku, distributor_id, distributor_name, NOW() AS loaded_at,
-    op_current_year, op_current_period, op_current_week, is_ytd_calc, op_last_period,
+    b.channel, b.year, b.period, b.periodname, b.week,
+    b.nsm_id, b.nsm_name, b.grsm_id, b.grsm_name, b.rsm_id, b.rsm_name, b.ss_id, b.ss_name,
+    b.sbu_id, b.sbu_name, b.brand_id, b.brand_name, b.subbrand_id, b.subbrand_name, b.parent_id, b.parent_name,
+    b.flag_sku, b.distributor_id, b.distributor_name, NOW() AS loaded_at,
+    b.op_current_year, b.op_current_period, b.op_current_week, b.is_ytd_calc, b.op_last_period,
     
     'VALUE' AS pilihan_satuan,
-    target_value AS target_weekly,
-    stm_value AS stm_weekly,
+    b.target_value AS target_weekly,
+    b.stm_value AS stm_weekly,
     
-    -- Kolom pendukung LY (Last Year) untuk mode Growth YTD di plugin
-    COALESCE(stm_value_ly, 0) AS stm_weekly_ly,
+    -- Kolom pendukung dummy LY karena absen di Silver skema
+    0::numeric(20,4) AS stm_weekly_ly,
     
-    -- Kolom pendukung Salfo dan Target Setahun untuk mode Est. Achievement di plugin
-    COALESCE(salfo_value, 0) AS salfo_weekly,
-    target_val_fy AS target_full_year_statis
-FROM base_data
+    -- Kolom pendukung Salfo riil dan Target Setahun dari skema di atas
+    b.salfo_value AS salfo_weekly,
+    b.target_val_fy AS target_full_year_statis
+FROM base_data b
