@@ -22,7 +22,6 @@ base_with_op AS (
         c.cur_year AS op_current_year,
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
-        -- Karena s.week udah murni numeric, perbandingan ini dijamin 100% aman tanpa cast
         CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
@@ -87,7 +86,7 @@ matrix_core AS (
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
         COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
-        COALESCE(k.ytd_sales_helper_val, 0) AS ytd_sales_helper_val
+        COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
     FROM matrix_cumulative mc
     LEFT JOIN kuncian_global k ON mc.year = k.year AND mc.channel = k.channel
 ),
@@ -175,10 +174,9 @@ SELECT
     stm_qty_ly AS stm_weekly_ly,
     salfo_qty_ly AS salfo_weekly_ly,
     
-    target_full_year_statis AS target_full_year_statis,
+    target_year_helper_qty AS target_full_year_statis,
     ytd_sales_helper_qty AS ytd_sales_statis,
 
-    -- Pengaman urutan filter: dipastikan aman karena bertindak murni numeric bawaan
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
@@ -223,7 +221,7 @@ SELECT
     stm_value_ly AS stm_weekly_ly,
     salfo_value_ly AS salfo_weekly_ly,
     
-    target_full_year_statis AS target_full_year_statis,
+    target_year_helper_val AS target_full_year_statis,
     ytd_sales_helper_val AS ytd_sales_statis,
 
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
