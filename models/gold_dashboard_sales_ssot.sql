@@ -164,7 +164,7 @@ FROM matrix_core
 
 UNION ALL
 
--- 🟢 2. BLOK DATA VALUE
+-- 🟢 2. BLOK DATA VALUE (SUDAH FIXED DARI TYPO DOUBLE AS)
 SELECT 
     channel, year, period, periodname, spine_week AS week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -183,11 +183,11 @@ SELECT
     0 AS sta_weekly,
     0 AS stock_qty,
     0 AS stock_value_raw,
-    0 AS avg_5w_value AS avg_5w,
+    0 AS avg_5w, -- <-- FIXED BARIS SAKTI DISINI, BRO!
     0 AS avg_5w_value_raw,
-    0 AS avg_13w_value AS avg_13w,
+    0 AS avg_13w,
     0 AS avg_13w_value_raw,
-    0 AS avg_5w_sta_value AS avg_5w_sta,
+    0 AS avg_5w_sta,
     0 AS avg_5w_sta_value_raw,
     
     0 AS target_weekly_lm,
