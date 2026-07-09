@@ -54,24 +54,28 @@ aggregated_flat_data AS (
 ),
 
 base_data_ytd AS (
-    -- 🌟 3. PROSES GULUNGAN YTD & MTD (Tetap dipertahankan tanpa diubah)
+    -- 🌟 3. PROSES GULUNGAN YTD & MTD (Nembak ke kolom _orig hasil aggregasi di atas)
     SELECT 
         a.*,
-        SUM(a.target_qty_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_qty_ytd,
-        SUM(a.stm_qty_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_qty_ytd,
+        -- Qty YTD
+        SUM(a.target_qty_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_qty_ytd,
+        SUM(a.stm_qty_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_qty_ytd,
         SUM(a.stm_qty_ly_raw) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_qty_ytd_ly,
         
-        SUM(a.target_val_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_val_ytd,
-        SUM(a.stm_val_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_val_ytd,
+        -- Value YTD
+        SUM(a.target_val_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_val_ytd,
+        SUM(a.stm_val_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_val_ytd,
         SUM(a.stm_val_ly_raw) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_val_ytd_ly,
         
-        SUM(a.target_qty_cy) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_qty_mtd,
-        SUM(a.stm_qty_cy) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_qty_mtd,
-        SUM(a.target_val_cy) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_val_mtd,
-        SUM(a.stm_val_cy) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_val_mtd,
+        -- MTD Bulanan (Menggunakan kolom _orig)
+        SUM(a.target_qty_orig) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_qty_mtd,
+        SUM(a.stm_qty_orig) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_qty_mtd,
+        SUM(a.target_val_orig) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS target_val_mtd,
+        SUM(a.stm_val_orig) OVER (PARTITION BY a.year, a.period, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id ORDER BY a.week) AS stm_val_mtd,
 
-        SUM(a.target_qty_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id) AS target_qty_fy_statis,
-        SUM(a.target_val_cy) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id) AS target_val_fy_statis
+        -- Target Statis Full Year (Menggunakan kolom _orig)
+        SUM(a.target_qty_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id) AS target_qty_fy_statis,
+        SUM(a.target_val_orig) OVER (PARTITION BY a.year, a.channel, a.sbu_id, a.grsm_id, a.rsm_id, a.ss_id, a.parent_id, a.brand_id, a.subbrand_id, a.flag_sku, a.distributor_id) AS target_val_fy_statis
     FROM aggregated_flat_data a
 ),
 
@@ -106,13 +110,11 @@ unpivoted AS (
         
         'QTY' AS pilihan_satuan,
         
-        -- 🌟 4. KOLOM BARU: ORIGINAL VALUE MINGGUAN (ANTI-GULUNG)
         target_qty_orig AS target_original,
         stm_qty_orig AS stm_original,
         salfo_qty_orig AS salfo_original,
         est_stm_forward_qty AS est_forward_original,
         
-        -- Kolom Kalkulasi Lama (Tetap Dipertahankan)
         target_qty_ytd AS target_ytd, 
         stm_qty_ytd AS stm_ytd, 
         stm_qty_ytd_ly AS stm_ytd_ly,
@@ -123,7 +125,7 @@ unpivoted AS (
         avg_5w_qty AS avg_5w_value, 
         avg_13w_qty AS avg_13w_value,
         target_qty_fy_statis AS target_full_year_statis,
-        (stm_qty_ytd + salfo_qty_orig + est_stm_forward_qty) AS stm_est_fy,
+        (target_qty_ytd + salfo_qty_orig + est_stm_forward_qty) AS stm_est_fy,
         
         period AS min_urutan_period, 
         week AS urutan_filter_week,
@@ -141,13 +143,11 @@ unpivoted AS (
         
         'VALUE' AS pilihan_satuan,
         
-        -- 🌟 4. KOLOM BARU: ORIGINAL VALUE MINGGUAN (ANTI-GULUNG)
         target_val_orig AS target_original,
         stm_val_orig AS stm_original,
         salfo_val_orig AS salfo_original,
         est_stm_forward_val AS est_forward_original,
         
-        -- Kolom Kalkulasi Lama (Tetap Dipertahankan)
         target_val_ytd AS target_ytd, 
         stm_val_ytd AS stm_ytd, 
         stm_val_ytd_ly AS stm_ytd_ly,
@@ -158,7 +158,7 @@ unpivoted AS (
         avg_5w_value AS avg_5w_value, 
         avg_13w_value AS avg_13w_value,
         target_val_fy_statis AS target_full_year_statis,
-        (s.stm_val_ytd + salfo_val_orig + est_stm_forward_val) AS stm_est_fy, -- s.stm_val_ytd diganti clm stm_val_ytd
+        (target_val_ytd + salfo_val_orig + est_stm_forward_val) AS stm_est_fy,
         
         period AS min_urutan_period, 
         week AS urutan_filter_week,
