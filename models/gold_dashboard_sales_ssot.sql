@@ -104,15 +104,19 @@ matrix_core AS (
     FROM matrix_cumulative mc
     LEFT JOIN (
         SELECT 
-            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, rsm_id, ss_id,
+            year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id,
             SUM(target_qty::numeric(20,4)) AS target_qty_full_year,
             SUM(target_value::numeric(20,4)) AS target_val_full_year
         FROM spx.silver_sales_performance_parent
-        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id, rsm_id, ss_id
-    ) t ON mc.year = t.year AND mc.channel = t.channel AND mc.sbu_id = t.sbu_id AND mc.parent_id = t.parent_id 
-       AND mc.brand_id = t.brand_id AND mc.subbrand_id = t.subbrand_id AND mc.flag_sku = t.flag_sku 
-       AND mc.distributor_id = t.distributor_id AND mc.nsm_id = t.nsm_id AND mc.grsm_id = t.grsm_id 
-       AND mc.rsm_id = t.rsm_id AND mc.ss_id = t.ss_id
+        GROUP BY year, channel, sbu_id, parent_id, brand_id, subbrand_id, flag_sku, distributor_id
+    ) t ON mc.year = t.year 
+       AND mc.channel = t.channel 
+       AND mc.sbu_id = t.sbu_id 
+       AND mc.parent_id = t.parent_id 
+       AND mc.brand_id = t.brand_id 
+       AND mc.subbrand_id = t.subbrand_id 
+       AND mc.flag_sku = t.flag_sku 
+       AND mc.distributor_id = t.distributor_id
 )
 
 -- =========================================================================
@@ -164,7 +168,7 @@ FROM matrix_core
 
 UNION ALL
 
--- 🟢 2. BLOK DATA VALUE (SUDAH FIXED DARI TYPO DOUBLE AS)
+-- 🟢 2. BLOK DATA VALUE
 SELECT 
     channel, year, period, periodname, spine_week AS week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -183,7 +187,7 @@ SELECT
     0 AS sta_weekly,
     0 AS stock_qty,
     0 AS stock_value_raw,
-    0 AS avg_5w, -- <-- FIXED BARIS SAKTI DISINI, BRO!
+    0 AS avg_5w,
     0 AS avg_5w_value_raw,
     0 AS avg_13w,
     0 AS avg_13w_value_raw,
