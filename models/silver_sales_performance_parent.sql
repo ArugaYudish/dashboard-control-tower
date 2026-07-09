@@ -121,7 +121,7 @@ select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.per
        round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
        stm.stm_qty, stm.stm_value,
        ws.stock_ibn, ws.stock_ibn_value, fdos.fdos_update, fdos.fdos_value, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
-       stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at
+       stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at, cr.flag
 from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp
 left join spx.m_division mdiv on mdiv.div_id = mp.div_id
 left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
