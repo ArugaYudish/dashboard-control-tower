@@ -2,7 +2,7 @@
     materialized='table',
     alias='gold_dashboard_sales_ssot',
     indexes=[
-      {'columns': ['year', 'period', 'week', 'pilihan_satuan', 'channel', 'parent_id']}
+      {'columns': ['year', 'period', 'week', 'pilihan_satuan', 'channel', 'parent_id', 'distributor_id', 'rsm_id']}
     ]
 ) }}
 
@@ -23,22 +23,21 @@ base_with_op AS (
         c.cur_period AS op_current_period,
         c.cur_week AS op_current_week,
         CASE WHEN s.week <= c.cur_week THEN 1 ELSE 0 END AS is_ytd_calc,
-        -- Kolom Helper: Mengunci Target Bulan Lalu secara Otomatis
         CASE WHEN c.cur_period = 1 THEN 12 ELSE (c.cur_period - 1) END AS op_last_period
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
+    -- Proteksi awal agar baris sampah yang week-nya ga valid ga merusak urutan database
+    WHERE s.week IS NOT NULL AND s.week != '' AND s.week != '0'
 ),
 
 -- =========================================================================
--- ⚡ STEP KUNCIAN MUTLAK: Hitung Agregat Global Level Atas per Tahun & Channel
+-- ⚡ STEP KUNCIAN GLOBAL BULANAN & TAHUNAN (Helper Statis Level Atas)
 -- =========================================================================
 kuncian_global AS (
     SELECT 
         year, channel,
-        -- Kunci Target Setahun Penuh Murni per Channel (Untuk Kuncian Mati Card 6)
         SUM(target_qty) AS target_qty_full_year,
         SUM(target_value) AS target_val_full_year,
-        -- Kunci Aktual Penjualan YTD (Awal tahun s/d Operational Week)
         SUM(CASE WHEN week <= op_current_week THEN stm_qty + salfo_qty ELSE 0 END) AS ytd_sales_qty_pure,
         SUM(CASE WHEN week <= op_current_week THEN stm_value + salfo_value ELSE 0 END) AS ytd_sales_val_pure
     FROM base_with_op
@@ -46,16 +45,39 @@ kuncian_global AS (
 ),
 
 -- =========================================================================
--- 🔑 STEP AKUMULASI SEJATI (WINDOW FUNCTION YTD CUMULATIVE)
+-- 🔑 STEP AKUMULASI SEJATI (WINDOW FUNCTION LOCK TOTAL PK DASHBOARD)
 -- =========================================================================
 matrix_cumulative AS (
     SELECT 
         b.*,
-        -- Mengakumulasikan data dari Week 1 s/d Week berjalan secara presisi per segmen
-        SUM(b.target_qty) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS target_qty_ytd_cum,
-        SUM(b.target_value) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS target_val_ytd_cum,
-        SUM(b.stm_qty) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS stm_qty_ytd_cum,
-        SUM(b.stm_value) OVER (PARTITION BY b.year, b.channel, b.distributor_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku ORDER BY b.week::numeric) AS stm_val_ytd_cum
+        -- Mengakumulasikan data dari Week 1 s/d Week berjalan murni per Unique Row Identity
+        SUM(b.target_qty) OVER (
+            PARTITION BY 
+                b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
+                b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
+            ORDER BY b.week::numeric
+        ) AS target_qty_ytd_cum,
+        
+        SUM(b.target_value) OVER (
+            PARTITION BY 
+                b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
+                b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
+            ORDER BY b.week::numeric
+        ) AS target_val_ytd_cum,
+        
+        SUM(b.stm_qty) OVER (
+            PARTITION BY 
+                b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
+                b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
+            ORDER BY b.week::numeric
+        ) AS stm_qty_ytd_cum,
+        
+        SUM(b.stm_value) OVER (
+            PARTITION BY 
+                b.channel, b.year, b.sbu_id, b.parent_id, b.brand_id, b.subbrand_id, b.flag_sku,
+                b.distributor_id, b.nsm_id, b.grsm_id, b.rsm_id, b.ss_id
+            ORDER BY b.week::numeric
+        ) AS stm_val_ytd_cum
     FROM base_with_op b
 ),
 
@@ -64,15 +86,12 @@ matrix_core AS (
         mc.*,
         COALESCE(k.target_qty_full_year, 0) AS target_year_helper_qty,
         COALESCE(k.target_val_full_year, 0) AS target_year_helper_val,
-        COALESCE(k.ytd_sales_qty_pure, 0) AS ytd_sales_helper_qty,
-        COALESCE(k.ytd_sales_val_pure, 0) AS ytd_sales_helper_val
+        COALESCE(k.ytd_sales_helper_qty, 0) AS ytd_sales_helper_qty,
+        COALESCE(k.ytd_sales_helper_val, 0) AS ytd_sales_helper_val
     FROM matrix_cumulative mc
     LEFT JOIN kuncian_global k ON mc.year = k.year AND mc.channel = k.channel
 ),
 
--- =========================================================================
--- ⚡ STEP KUNCIAN BULANAN: Agregasi Volume Bulanan Murni untuk Base Last Month
--- =========================================================================
 kuncian_bulanan AS (
     SELECT 
         year, period, channel, distributor_id, parent_id,
@@ -86,13 +105,9 @@ kuncian_bulanan AS (
     GROUP BY year, period, channel, distributor_id, parent_id
 ),
 
--- =========================================================================
--- ⚡ STEP HORIZONTAL JOIN: Menjajarkan Data LY & LM
--- =========================================================================
 matrix_with_ly_and_lm AS (
     SELECT 
         curr.*,
-        -- Pembanding Tahun Lalu (LY)
         COALESCE(ly.stm_qty, 0) AS stm_qty_ly,
         COALESCE(ly.stm_value, 0) AS stm_value_ly,
         COALESCE(ly.salfo_qty, 0) AS salfo_qty_ly,
@@ -100,7 +115,6 @@ matrix_with_ly_and_lm AS (
         COALESCE(ly.target_qty, 0) AS target_qty_ly,
         COALESCE(ly.target_value, 0) AS target_value_ly,
         
-        -- Pembanding Last Month (LM) - Mundur 1 Period secara Dinamis
         COALESCE(lm.target_qty_lm_raw, 0) AS target_qty_lm,
         COALESCE(lm.target_val_lm_raw, 0) AS target_value_lm,
         COALESCE(lm.stm_qty_lm_raw, 0) AS stm_qty_lm,
@@ -124,7 +138,7 @@ matrix_with_ly_and_lm AS (
 )
 
 -- =========================================================================
--- PROSES UNPIVOT VERTIKAL (TOGGLE QTY VS VALUE SUPERSET)
+-- 🔀 UNPIVOT BLOK DATA VERTIKAL SUPERSET
 -- =========================================================================
 
 -- 🔵 1. BLOK DATA QTY
@@ -167,7 +181,7 @@ SELECT
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
-    -- 💎 KOLOM DATA MATENG BARU: Akumulatif YTD Sejati
+    -- 💎 Kolom Mateng Hasil Kuncian Total PK
     target_qty_ytd_cum AS target_ytd_mateng,
     stm_qty_ytd_cum AS stm_ytd_mateng
 FROM matrix_with_ly_and_lm
@@ -214,7 +228,7 @@ SELECT
     CASE WHEN period::numeric = op_current_period THEN 0 ELSE period::numeric END AS urutan_filter_period,
     CASE WHEN week::numeric = op_current_week THEN 0 ELSE week::numeric END AS urutan_filter_week,
 
-    -- 💎 KOLOM DATA MATENG BARU: Akumulatif YTD Sejati
+    -- 💎 Kolom Mateng Hasil Kuncian Total PK
     target_val_ytd_cum AS target_ytd_mateng,
     stm_val_ytd_cum AS stm_ytd_mateng
 FROM matrix_with_ly_and_lm
