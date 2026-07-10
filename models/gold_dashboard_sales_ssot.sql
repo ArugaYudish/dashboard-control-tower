@@ -42,7 +42,7 @@ linear_time_spine AS (
 ),
 
 closing_period_data AS (
-    -- 🛑 3. CTE PENGUNCI CLOSING: MENGHITUNG TOTAL 1 BULAN PENUH PER PERIODE (ANTI-LAG MELAR)
+    -- 🛑 3. CTE PENGUNCI CLOSING: MENGHITUNG TOTAL 1 BULAN PENUH PER PERIODE
     SELECT 
         year::int AS cl_year,
         period::int AS cl_period,
@@ -80,12 +80,13 @@ base_ty AS (
 
 base_ly AS (
     -- 🟢 BLOK DATA TAHUN LALU (2025) BERGULUNG SECARA INTERNAL
+    -- 🔧 FIX: s.ss_id sudah diganti menjadi l.ss_id dan target_val_ytd_ly sudah diarahkan ke l.target_value yang benar
     SELECT 
         l.*,
         SUM(l.target_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_qty_ytd_ly,
         SUM(l.stm_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_qty_ytd_ly,
         
-        SUM(l.target_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, s.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_ytd_ly,
+        SUM(l.target_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_ytd_ly,
         SUM(l.stm_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_val_ytd_ly
     FROM linear_time_spine l
     CROSS JOIN current_operational c
@@ -132,7 +133,7 @@ horizontal_registry AS (
         COALESCE(lm_internal.total_target_val_closing, lm_cross.total_target_val_closing, 0) AS target_val_lm,
         COALESCE(lm_internal.total_stm_val_closing, lm_cross.total_stm_val_closing, 0) AS stm_val_lm,
 
-        -- 🛡️ SELIPKAN SELURUH DATA INVENTORY & STOCK BAWAAN SILVER DI SINI
+        -- 🛡️ TERANGKUT AMAN: SELURUH DATA INVENTORY & STOCK BAWAAN SILVER
         ty.stock_qty, ty.stock_value, ty.stock_ibn, ty.stock_ibn_value, 
         ty.fdos_update, ty.fdos_value, ty.sta_qty, ty.sta_value
 
@@ -173,7 +174,6 @@ unpivoted AS (
         CASE WHEN week::int <= cur_week THEN avg_5w_qty_raw ELSE 0 END AS avg_5w_value, 
         CASE WHEN week::int <= cur_week THEN avg_13w_qty_raw ELSE 0 END AS avg_13w_value,
         
-        -- 📦 Oper Data Stock Qty Utuh ke Bawah
         stock_qty, stock_value, stock_ibn, stock_ibn_value, fdos_update, fdos_value, sta_qty, sta_value,
         
         period AS min_urutan_period, week AS urutan_filter_week,
@@ -201,7 +201,6 @@ unpivoted AS (
         CASE WHEN week::int <= cur_week THEN avg_5w_val_raw ELSE 0 END AS avg_5w_value, 
         CASE WHEN week::int <= cur_week THEN avg_13w_val_raw ELSE 0 END AS avg_13w_value,
         
-        -- 📦 Oper Data Stock Value Utuh ke Bawah
         stock_qty, stock_value, stock_ibn, stock_ibn_value, fdos_update, fdos_value, sta_qty, sta_value,
         
         period AS min_urutan_period, week AS urutan_filter_week,
