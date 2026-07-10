@@ -7,7 +7,7 @@
 ) }}
 
 WITH current_operational AS (
-    -- 📅 1. ANCHOR WAKTU OPERASIONAL HARI INI
+    -- 📅 1. JANGKAR WAKTU OPERASIONAL HARI INI
     SELECT 
         year::int AS cur_year,
         period::int AS cur_period,
@@ -17,30 +17,77 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
-silver_ty AS (
-    -- 🔵 AMBIL DATA TAHUN INI (CURRENT YEAR)
+linear_time_spine AS (
+    -- 📉 2. KALKULASI TREN SECARA LINIER VERTIKAL (MELINTASI BATAS TAHUN AGAR AVG TIDAK KEMBAR)
     SELECT 
         s.*,
-        c.cur_year, c.cur_period, c.cur_week
+        -- Moving Average dihitung linier berurutan berdasarkan urutan kronologis tahun & minggu
+        AVG(CASE WHEN s.year::int = 2026 AND s.week > c.cur_week THEN 0 ELSE s.stm_qty END) 
+            OVER (PARTITION BY s.channel, s.sbu_id, s.grsm_id, s.rsm_id, s.ss_id, s.parent_id, s.brand_id, s.subbrand_id, s.flag_sku, s.distributor_id 
+                  ORDER BY s.year::int, s.week::int ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS avg_5w_qty_raw,
+                  
+        AVG(CASE WHEN s.year::int = 2026 AND s.week > c.cur_week THEN 0 ELSE s.stm_value END) 
+            OVER (PARTITION BY s.channel, s.sbu_id, s.grsm_id, s.rsm_id, s.ss_id, s.parent_id, s.brand_id, s.subbrand_id, s.flag_sku, s.distributor_id 
+                  ORDER BY s.year::int, s.week::int ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS avg_5w_val_raw,
+                  
+        AVG(CASE WHEN s.year::int = 2026 AND s.week > c.cur_week THEN 0 ELSE s.stm_qty END) 
+            OVER (PARTITION BY s.channel, s.sbu_id, s.grsm_id, s.rsm_id, s.ss_id, s.parent_id, s.brand_id, s.subbrand_id, s.flag_sku, s.distributor_id 
+                  ORDER BY s.year::int, s.week::int ROWS BETWEEN 12 PRECEDING AND CURRENT ROW) AS avg_13w_qty_raw,
+                  
+        AVG(CASE WHEN s.year::int = 2026 AND s.week > c.cur_week THEN 0 ELSE s.stm_value END) 
+            OVER (PARTITION BY s.channel, s.sbu_id, s.grsm_id, s.rsm_id, s.ss_id, s.parent_id, s.brand_id, s.subbrand_id, s.flag_sku, s.distributor_id 
+                  ORDER BY s.year::int, s.week::int ROWS BETWEEN 12 PRECEDING AND CURRENT ROW) AS avg_13w_val_raw
     FROM spx.silver_sales_performance_parent s
     CROSS JOIN current_operational c
-    WHERE s.year::int = c.cur_year AND s.week IS NOT NULL
+    WHERE s.year::int IN (2025, 2026) AND s.week IS NOT NULL
 ),
 
-silver_ly AS (
-    -- 🟢 AMBIL DATA TAHUN LALU (LAST YEAR = CURRENT YEAR - 1)
+base_ty AS (
+    -- 🔵 BLOK DATA TAHUN INI (2026 - CY) BERGULUNG SECARA INTERNAL
     SELECT 
-        s.year AS ly_year, s.period AS ly_period, s.week AS ly_week,
-        s.channel, s.parent_id, s.distributor_id, s.brand_id, s.subbrand_id, s.flag_sku,
-        s.stm_qty AS stm_qty_ly_raw,
-        s.stm_value AS stm_val_ly_raw
-    FROM spx.silver_sales_performance_parent s
+        l.*,
+        SUM(l.target_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_qty_ytd_ty,
+        SUM(CASE WHEN l.week::int <= c.cur_week THEN l.stm_qty ELSE 0 END) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_qty_ytd_ty,
+        
+        SUM(l.target_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_ytd_ty,
+        SUM(CASE WHEN l.week::int <= c.cur_week THEN l.stm_value ELSE 0 END) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_val_ytd_ty,
+        
+        -- MTD
+        SUM(l.target_qty) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_qty_mtd_ty,
+        SUM(CASE WHEN l.week::int <= c.cur_week THEN l.stm_qty ELSE 0 END) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_qty_mtd_ty,
+        
+        SUM(l.target_value) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_mtd_ty,
+        SUM(CASE WHEN l.week::int <= c.cur_week THEN l.stm_value ELSE 0 END) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_val_mtd_ty,
+        
+        c.cur_year, c.cur_period, c.cur_week
+    FROM linear_time_spine l
     CROSS JOIN current_operational c
-    WHERE s.year::int = (c.cur_year - 1) AND s.week IS NOT NULL
+    WHERE l.year::int = c.cur_year
 ),
 
-horizontal_base AS (
-    -- 🗜️ 2. JOIN HORIZONTAL UNTUK MERAPATKAN SUMBU TY & LY PER WEEK
+base_ly AS (
+    -- 🟢 BLOK DATA TAHUN LALU (2025 - LY) BERGULUNG SECARA INTERNAL
+    SELECT 
+        l.*,
+        SUM(l.target_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_qty_ytd_ly,
+        SUM(l.stm_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_qty_ytd_ly,
+        
+        SUM(l.target_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_ytd_ly,
+        SUM(l.stm_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_val_ytd_ly,
+        
+        -- MTD (Untuk keperluan Ach LM cross-year)
+        SUM(l.target_qty) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_qty_mtd_ly,
+        SUM(l.stm_qty) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_qty_mtd_ly,
+        
+        SUM(l.target_value) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS target_val_mtd_ly,
+        SUM(l.stm_value) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week::int) AS stm_val_mtd_ly
+    FROM linear_time_spine l
+    CROSS JOIN current_operational c
+    WHERE l.year::int = (c.cur_year - 1)
+),
+
+horizontal_registry AS (
+    -- 🗜️ 3. JOIN HORIZONTAL MUTLAK BERDASARKAN DIMENSI DAN WEEK
     SELECT 
         ty.year, ty.period, ty.periodname, ty.week,
         ty.channel, ty.nsm_id, ty.nsm_name, ty.grsm_id, ty.grsm_name, ty.rsm_id, ty.rsm_name, ty.ss_id, ty.ss_name,
@@ -48,21 +95,49 @@ horizontal_base AS (
         ty.flag_sku, ty.distributor_id, ty.distributor_name, ty.loaded_at,
         ty.cur_year, ty.cur_period, ty.cur_week,
         
-        -- 🔒 DATA MENTAH ORIGINAL (Jika week > week operasional, STM & SALFO dipaksa 0!)
+        -- 📦 DATA ORIGINAL CURRENT YEAR (Jika week di masa depan, STM diganti SALFO)
         ty.target_qty AS target_qty_orig,
-        CASE WHEN ty.week <= ty.cur_week THEN ty.stm_qty ELSE 0 END AS stm_qty_orig,
-        CASE WHEN ty.week <= ty.cur_week THEN ty.salfo_qty ELSE 0 END AS salfo_qty_orig,
-        
         ty.target_value AS target_val_orig,
-        CASE WHEN ty.week <= ty.cur_week THEN ty.stm_value ELSE 0 END AS stm_val_orig,
-        CASE WHEN ty.week <= ty.cur_week THEN ty.salfo_value ELSE 0 END AS salfo_val_orig,
         
-        -- Data historical tahun lalu langsung nempel manis di samping
-        COALESCE(ly.stm_qty_ly_raw, 0) AS stm_qty_ly_ly_raw,
-        COALESCE(ly.stm_val_ly_raw, 0) AS stm_val_ly_ly_raw
-    FROM silver_ty ty
-    LEFT JOIN silver_ly ly 
-      ON ty.week = ly.ly_week 
+        CASE WHEN ty.week::int <= ty.cur_week THEN ty.stm_qty ELSE 0 END AS stm_qty_orig,
+        CASE WHEN ty.week::int <= ty.cur_week THEN ty.stm_value ELSE 0 END AS stm_val_orig,
+        
+        CASE WHEN ty.week::int <= ty.cur_week THEN ty.salfo_qty ELSE 0 END AS salfo_qty_orig,
+        CASE WHEN ty.week::int <= ty.cur_week THEN ty.salfo_value ELSE 0 END AS salfo_val_orig,
+        
+        -- 🔮 ESTIMASI PENGGANTI (Jika masa depan, ambil SALFO asli buat isi kekosongan STM)
+        CASE WHEN ty.week::int > ty.cur_week THEN ty.salfo_qty ELSE 0 END AS est_forward_qty_orig,
+        CASE WHEN ty.week::int > ty.cur_week THEN ty.salfo_value ELSE 0 END AS est_forward_val_orig,
+        
+        -- ⚙️ DATA YTD & MTD CURRENT YEAR
+        ty.target_qty_ytd_ty, ty.stm_qty_ytd_ty,
+        ty.target_val_ytd_ty, ty.stm_val_ytd_ty,
+        ty.target_qty_mtd_ty, ty.stm_qty_mtd_ty,
+        ty.target_val_mtd_ty, ty.stm_val_mtd_ty,
+        
+        -- 📈 DATA MOVING AVERAGE LINIER (Anti-Kembar)
+        ty.avg_5w_qty_raw, ty.avg_5w_val_raw,
+        ty.avg_13w_qty_raw, ty.avg_13w_val_raw,
+        
+        -- 🟢 ATRIBUT HISTORIS TAHUN LALU (Menempel horizontal di baris CY)
+        COALESCE(ly.target_qty, 0) AS target_qty_ly_orig,
+        COALESCE(ly.target_value, 0) AS target_val_ly_orig,
+        COALESCE(ly.stm_qty, 0) AS stm_qty_ly_orig,
+        COALESCE(ly.stm_value, 0) AS stm_val_ly_orig,
+        
+        COALESCE(ly.target_qty_ytd_ly, 0) AS target_qty_ytd_ly,
+        COALESCE(ly.stm_qty_ytd_ly, 0) AS stm_qty_ytd_ly,
+        COALESCE(ly.target_val_ytd_ly, 0) AS target_val_ytd_ly,
+        COALESCE(ly.stm_val_ytd_ly, 0) AS stm_val_ytd_ly,
+        
+        -- Data MTD Tahun lalu ditempel buat pengaman LAG di Period 1
+        COALESCE(ly.target_qty_mtd_ly, 0) AS target_qty_mtd_ly,
+        COALESCE(ly.stm_qty_mtd_ly, 0) AS stm_qty_mtd_ly,
+        COALESCE(ly.target_val_mtd_ly, 0) AS target_val_mtd_ly,
+        COALESCE(ly.stm_val_mtd_ly, 0) AS stm_val_mtd_ly
+    FROM base_ty ty
+    LEFT JOIN base_ly ly 
+      ON ty.week::int = ly.week::int 
      AND ty.channel = ly.channel 
      AND ty.parent_id = ly.parent_id 
      AND ty.distributor_id = ly.distributor_id
@@ -71,58 +146,27 @@ horizontal_base AS (
      AND ty.flag_sku = ly.flag_sku
 ),
 
-base_data_ytd AS (
-    -- 🌟 3. PROSES GULUNGAN YTD & MTD (Hanya bergulung sampai week aktif operasional)
-    SELECT 
-        hb.*,
-        -- Qty YTD & MTD
-        SUM(hb.target_qty_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS target_qty_ytd,
-        SUM(hb.stm_qty_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_qty_ytd,
-        SUM(hb.stm_qty_ly_ly_raw) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_qty_ytd_ly,
-        
-        SUM(hb.target_qty_orig) OVER (PARTITION BY hb.year, hb.period, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS target_qty_mtd,
-        SUM(hb.stm_qty_orig) OVER (PARTITION BY hb.year, hb.period, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_qty_mtd,
-
-        -- Value YTD & MTD
-        SUM(hb.target_val_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS target_val_ytd,
-        SUM(hb.stm_val_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_val_ytd,
-        SUM(hb.stm_val_ly_ly_raw) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_val_ytd_ly,
-        
-        SUM(hb.target_val_orig) OVER (PARTITION BY hb.year, hb.period, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS target_val_mtd,
-        SUM(hb.stm_val_orig) OVER (PARTITION BY hb.year, hb.period, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id ORDER BY hb.week) AS stm_val_mtd,
-
-        -- Target Statis Full Year (Murni SUM dari total target_original di internal entitas)
-        SUM(hb.target_qty_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id) AS target_qty_fy_statis,
-        SUM(hb.target_val_orig) OVER (PARTITION BY hb.year, hb.channel, hb.sbu_id, hb.grsm_id, hb.rsm_id, hb.ss_id, hb.parent_id, hb.brand_id, hb.subbrand_id, hb.flag_sku, hb.distributor_id) AS target_val_fy_statis
-    FROM horizontal_base hb
-),
-
 calculated_features AS (
-    -- 📈 4. PERHITUNGAN TREN & LAG (ANTI BOCOR MASA DEPAN & ANTI SEKAT TAHUN)
+    -- 🕵️‍♂️ 4. PROSES LAG BULAN LALU (LAST MONTH) BERBASIS BARIS HORIZONTAL 2026
     SELECT 
-        bd.*,
-        -- Menggunakan LAG 4 baris untuk mengambil data Bulan Lalu (Last Month)
-        LAG(bd.target_qty_mtd, 4) OVER (PARTITION BY bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.year, bd.week) AS target_qty_lm_raw,
-        LAG(bd.stm_qty_mtd, 4) OVER (PARTITION BY bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.year, bd.week) AS stm_qty_lm_raw,
-        LAG(bd.target_val_mtd, 4) OVER (PARTITION BY bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.year, bd.week) AS target_val_lm_raw,
-        LAG(bd.stm_val_mtd, 4) OVER (PARTITION BY bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.year, bd.week) AS stm_val_lm_raw,
-
-        -- Moving Average 5W & 13W (Dihitung dari data original mingguan)
-        AVG(bd.stm_qty_orig) OVER (PARTITION BY bd.year, bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.week ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS avg_5w_qty_raw,
-        AVG(bd.stm_val_orig) OVER (PARTITION BY bd.year, bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.week ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS avg_5w_val_raw,
-        
-        AVG(bd.stm_qty_orig) OVER (PARTITION BY bd.year, bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.week ROWS BETWEEN 12 PRECEDING AND CURRENT ROW) AS avg_13w_qty_raw,
-        AVG(bd.stm_val_orig) OVER (PARTITION BY bd.year, bd.channel, bd.sbu_id, bd.grsm_id, bd.rsm_id, bd.ss_id, bd.parent_id, bd.brand_id, bd.subbrand_id, bd.flag_sku, bd.distributor_id ORDER BY bd.week ROWS BETWEEN 12 PRECEDING AND CURRENT ROW) AS avg_13w_val_raw
-    FROM base_data_ytd bd
+        hr.*,
+        -- Normal LAG untuk week > 4 (Masih di tahun 2026)
+        LAG(hr.target_qty_mtd_ty, 4) OVER (PARTITION BY hr.year, hr.channel, hr.sbu_id, hr.grsm_id, hr.rsm_id, hr.ss_id, hr.parent_id, hr.brand_id, hr.subbrand_id, hr.flag_sku, hr.distributor_id ORDER BY hr.week::int) AS target_qty_lm_internal,
+        LAG(hr.stm_qty_mtd_ty, 4) OVER (PARTITION BY hr.year, hr.channel, hr.sbu_id, hr.grsm_id, hr.rsm_id, hr.ss_id, hr.parent_id, hr.brand_id, hr.subbrand_id, hr.flag_sku, hr.distributor_id ORDER BY hr.week::int) AS stm_qty_lm_internal,
+        LAG(hr.target_val_mtd_ty, 4) OVER (PARTITION BY hr.year, hr.channel, hr.sbu_id, hr.grsm_id, hr.rsm_id, hr.ss_id, hr.parent_id, hr.brand_id, hr.subbrand_id, hr.flag_sku, hr.distributor_id ORDER BY hr.week::int) AS target_val_lm_internal,
+        LAG(hr.stm_val_mtd_ty, 4) OVER (PARTITION BY hr.year, hr.channel, hr.sbu_id, hr.grsm_id, hr.rsm_id, hr.ss_id, hr.parent_id, hr.brand_id, hr.subbrand_id, hr.flag_sku, hr.distributor_id ORDER BY hr.week::int) AS stm_val_lm_internal
+    FROM horizontal_registry hr
 ),
 
-final_projections AS (
-    -- 🔮 5. ESTIMASI PROYEKSI AKHIR TAHUN BERDASARKAN HARI INI
+final_handled_data AS (
+    -- 🛡️ 5. INTERCEPT KHUSUS UNTUK MENANGANI WEEK AWAL (PERIOD 1 2026 NAMBAK KE DESEMBER 2025 HORIZONTAL)
     SELECT 
         cf.*,
-        -- Forward Estimate: ((YTD + Salfo) / week berjalan) * sisa minggu ke depan
-        CASE WHEN cf.cur_week > 0 THEN ((cf.stm_qty_ytd + cf.salfo_qty_orig) / cf.cur_week) * (52 - cf.cur_week) ELSE 0 END AS est_stm_forward_qty,
-        CASE WHEN cf.cur_week > 0 THEN ((cf.stm_val_ytd + cf.salfo_val_orig) / cf.cur_week) * (52 - cf.cur_week) ELSE 0 END AS est_stm_forward_val
+        -- Jika week <= 4 (Period 1), ambil data MTD milik tahun lalu di week yang bersesuaian (Week 49-52 tahun lalu)
+        CASE WHEN cf.week::int <= 4 THEN cf.target_qty_mtd_ly ELSE COALESCE(cf.target_qty_lm_internal, 0) END AS target_qty_lm,
+        CASE WHEN cf.week::int <= 4 THEN cf.stm_qty_mtd_ly ELSE COALESCE(cf.stm_qty_lm_internal, 0) END AS stm_qty_lm,
+        CASE WHEN cf.week::int <= 4 THEN cf.target_val_mtd_ly ELSE COALESCE(cf.target_val_lm_internal, 0) END AS target_val_lm,
+        CASE WHEN cf.week::int <= 4 THEN cf.stm_val_mtd_ly ELSE COALESCE(cf.stm_val_lm_internal, 0) END AS stm_val_lm
     FROM calculated_features cf
 ),
 
@@ -136,31 +180,33 @@ unpivoted AS (
         
         'QTY' AS pilihan_satuan,
         
-        -- 📦 Ember Data Original Mingguan (Mentah Tanpa Gulungan)
+        -- Ember Data Original Mingguan (Murni Tanpa Gulungan)
         target_qty_orig AS target_original,
         stm_qty_orig AS stm_original,
         salfo_qty_orig AS salfo_original,
-        est_stm_forward_qty AS est_forward_original,
+        est_forward_qty_orig AS est_forward_original,
         
-        -- ⚙️ Ember Data Kalkulasi (Dipaksa 0 jika filter melompati minggu operasional aktif)
-        target_qty_ytd AS target_ytd, 
-        stm_qty_ytd AS stm_ytd, 
+        target_qty_ly_orig AS target_original_ly,
+        stm_qty_ly_orig AS stm_original_ly,
+        
+        -- Ember Data Kalkulasi Dashboard (Kunci 0 jika melompati kalender operasional riil)
+        target_qty_ytd_ty AS target_ytd, 
+        stm_qty_ytd_ty AS stm_ytd, 
+        target_qty_ytd_ly AS target_ytd_ly,
         stm_qty_ytd_ly AS stm_ytd_ly,
-        target_qty_mtd AS target_mtd, 
-        stm_qty_mtd AS stm_mtd,
         
-        CASE WHEN week <= cur_week THEN COALESCE(target_qty_lm_raw, 0) ELSE 0 END AS target_lm, 
-        CASE WHEN week <= cur_week THEN COALESCE(stm_qty_lm_raw, 0) ELSE 0 END AS stm_lm,
-        CASE WHEN week <= cur_week THEN avg_5w_qty_raw ELSE 0 END AS avg_5w_value, 
-        CASE WHEN week <= cur_week THEN avg_13w_qty_raw ELSE 0 END AS avg_13w_value,
+        target_qty_mtd_ty AS target_mtd, 
+        stm_qty_mtd_ty AS stm_mtd,
         
-        target_qty_fy_statis AS target_full_year_statis,
-        (target_qty_ytd + salfo_qty_orig + est_stm_forward_qty) AS stm_est_fy,
+        CASE WHEN week::int <= cur_week THEN COALESCE(target_qty_lm, 0) ELSE 0 END AS target_lm, 
+        CASE WHEN week::int <= cur_week THEN COALESCE(stm_qty_lm, 0) ELSE 0 END AS stm_lm,
+        CASE WHEN week::int <= cur_week THEN avg_5w_qty_raw ELSE 0 END AS avg_5w_value, 
+        CASE WHEN week::int <= cur_week THEN avg_13w_qty_raw ELSE 0 END AS avg_13w_value,
         
         period AS min_urutan_period, 
         week AS urutan_filter_week,
         CASE WHEN year = cur_year AND week = cur_week THEN 1 ELSE 0 END AS is_current_week
-    FROM final_projections
+    FROM final_handled_data
 
     UNION ALL
 
@@ -173,30 +219,32 @@ unpivoted AS (
         
         'VALUE' AS pilihan_satuan,
         
-        -- 📦 Ember Data Original Mingguan (Mentah Tanpa Gulungan)
+        -- Ember Data Original Mingguan (Murni Tanpa Gulungan)
         target_val_orig AS target_original,
         stm_val_orig AS stm_original,
         salfo_val_orig AS salfo_original,
-        est_stm_forward_val AS est_forward_original,
+        est_forward_val_orig AS est_forward_original,
         
-        -- ⚙️ Ember Data Kalkulasi (Dipaksa 0 jika filter melompati minggu operasional aktif)
-        target_val_ytd AS target_ytd, 
-        stm_val_ytd AS stm_ytd, 
+        target_val_ly_orig AS target_original_ly,
+        stm_val_ly_orig AS stm_original_ly,
+        
+        -- Ember Data Kalkulasi Dashboard (Kunci 0 jika melompati kalender operasional riil)
+        target_val_ytd_ty AS target_ytd, 
+        stm_val_ytd_ty AS stm_ytd, 
+        target_val_ytd_ly AS target_ytd_ly,
         stm_val_ytd_ly AS stm_ytd_ly,
-        target_val_mtd AS target_mtd, 
-        stm_val_mtd AS stm_mtd,
         
-        CASE WHEN week <= cur_week THEN COALESCE(target_val_lm_raw, 0) ELSE 0 END AS target_lm, 
-        CASE WHEN week <= cur_week THEN COALESCE(stm_val_lm_raw, 0) ELSE 0 END AS stm_lm,
-        CASE WHEN week <= cur_week THEN avg_5w_val_raw ELSE 0 END AS avg_5w_value, 
-        CASE WHEN week <= cur_week THEN avg_13w_val_raw ELSE 0 END AS avg_13w_value,
+        target_val_mtd_ty AS target_mtd, 
+        stm_val_mtd_ty AS stm_mtd,
         
-        target_val_fy_statis AS target_full_year_statis,
-        (target_val_ytd + salfo_val_orig + est_stm_forward_val) AS stm_est_fy,
+        CASE WHEN week::int <= cur_week THEN COALESCE(target_val_lm, 0) ELSE 0 END AS target_lm, 
+        CASE WHEN week::int <= cur_week THEN COALESCE(stm_val_lm, 0) ELSE 0 END AS stm_lm,
+        CASE WHEN week::int <= cur_week THEN avg_5w_val_raw ELSE 0 END AS avg_5w_value, 
+        CASE WHEN week::int <= cur_week THEN avg_13w_val_raw ELSE 0 END AS avg_13w_value,
         
         period AS min_urutan_period, 
         week AS urutan_filter_week,
         CASE WHEN year = cur_year AND week = cur_week THEN 1 ELSE 0 END AS is_current_week
-    FROM final_projections
+    FROM final_handled_data
 )
 SELECT * FROM unpivoted
