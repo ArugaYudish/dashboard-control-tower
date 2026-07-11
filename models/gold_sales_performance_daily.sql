@@ -32,4 +32,4 @@ from spx.silver_sales_performance s
 join week_days wd on wd.year = s.year and wd.week = s.week
 join days     d  on d.year  = s.year and d.week  = s.week   -- expands 1 weekly row -> n_days rows
 left join spx.m_division dv on dv.div_id = s.sbu_id
-left join {{ ref('division_group_map') }} dg on dg.div_id = s.sbu_id::varchar::varchar
+left join {{ ref('division_group_map') }} dg on dg.div_id = s.sbu_id::varchar
