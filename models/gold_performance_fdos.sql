@@ -16,7 +16,7 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- FIX: Arahkan source ke silver_sales_performance_parent yang punya kolom stock lengkap
+-- Tarik data mentah dari silver parent yang kolomnya lengkap
 prep_data AS (
     SELECT 
         parent.*,
@@ -28,7 +28,7 @@ prep_data AS (
     CROSS JOIN current_operational c
 ),
 
--- Proses Unpivot Vertikal metrik QTY dan VALUE beserta pasangan komponen SCD-nya
+-- Proses Unpivot Vertikal QTY dan VALUE
 unpivoted_metrics AS (
     -- Blok QTY
     SELECT 
@@ -40,7 +40,8 @@ unpivoted_metrics AS (
         'QTY' AS pilihan_satuan,
         sta_qty AS sta_value_final,
         fdos_update AS fdos_value_final,
-        -- Komponen SCD untuk QTY dari table parent
+        
+        -- Komponen SCD untuk QTY
         stock_qty AS stock_subdist_final,
         avg_5w_qty AS avg_stm_5w_final
     FROM prep_data
@@ -57,7 +58,8 @@ unpivoted_metrics AS (
         'VALUE' AS pilihan_satuan,
         sta_value AS sta_value_final,
         fdos_value AS fdos_value_final,
-        -- Komponen SCD untuk VALUE dari table parent
+        
+        -- Komponen SCD untuk VALUE
         stock_value AS stock_subdist_final,
         avg_5w_value AS avg_stm_5w_final
     FROM prep_data
