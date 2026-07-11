@@ -17,33 +17,35 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- 🏗️ 2. MEMBANGUN DENSE GRID (TULANG PUNGGUNG WAKTU & DIMENSI YANG PADAT)
 calendar_spine AS (
+    -- 📅 2. AMBIL RANGKA WAKTU DARI KALENDER MASTER
     SELECT DISTINCT 
         year::int AS year, 
         period::int AS period, 
-        periodname, 
         week::int AS week
     FROM spx.m_cycle3
     WHERE year::int IN (2025, 2026)
 ),
 
 dim_spine AS (
+    -- 🏢 3. AMBIL SELURUH KOMBINASI DIMENSI MASTER DARI DATA SILVER SFA
     SELECT DISTINCT 
         channel, nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
         sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
-        flag_sku, distributor_id, distributor_name
+        flag_sku, distributor_id, distributor_name, periodname
     FROM spx.silver_sales_performance_parent
     WHERE year::int IN (2025, 2026)
 ),
 
 dense_grid AS (
-    SELECT c.year, c.period, c.periodname, c.week, d.*
+    -- 🏗️ 4. CROSS JOIN UNTUK MEMBUAT WADAH KOSONG YANG PADAT (ANTI-SPARSE DATA)
+    SELECT c.year, c.period, c.week, d.*
     FROM calendar_spine c
     CROSS JOIN dim_spine d
 ),
 
 silver_dense AS (
+    -- 🔄 5. LEFT JOIN UNTUK MENGISI WADAH KOSONG DENGAN DATA AKTUAL (JIKA KOSONG DISET 0)
     SELECT 
         g.year, g.period, g.periodname, g.week,
         g.channel, g.nsm_id, g.nsm_name, g.grsm_id, g.grsm_name, g.rsm_id, g.rsm_name, g.ss_id, g.ss_name,
@@ -60,6 +62,7 @@ silver_dense AS (
     FROM dense_grid g
     LEFT JOIN spx.silver_sales_performance_parent s
       ON g.year = s.year::int 
+     AND g.period = s.period::int 
      AND g.week = s.week::int
      AND g.distributor_id = s.distributor_id 
      AND g.flag_sku = s.flag_sku 
@@ -67,7 +70,7 @@ silver_dense AS (
 ),
 
 linear_time_spine AS (
-    -- 📉 3. KALKULASI TREN SECARA LINIER VERTIKAL (MOVING AVERAGE VIA DENSE DATA)
+    -- 📉 6. KALKULASI TREN MOVING AVERAGE 5W & 13W BERBASIS DATA DENSE
     SELECT 
         s.*,
         AVG(CASE WHEN s.year = 2026 AND s.week > c.cur_week THEN 0 ELSE s.stm_qty END) 
@@ -91,7 +94,7 @@ linear_time_spine AS (
 ),
 
 closing_period_data AS (
-    -- 🛑 4. CTE PENGUNCI CLOSING (Continuous Period Index untuk penyeberangan akhir tahun)
+    -- 🛑 7. CTE PENGUNCI CLOSING (Menggunakan Continuous Period Index)
     SELECT 
         year,
         period,
@@ -121,11 +124,11 @@ base_ty AS (
         SUM(l.target_value) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS target_val_mtd_ty,
         SUM(CASE WHEN l.week <= c.cur_week THEN l.stm_value ELSE 0 END) OVER (PARTITION BY l.year, l.period, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS stm_val_mtd_ty,
         
-        -- ✨ HELPER LOCK: Target Full Year (Dikunci murni per tahun)
+        -- ✨ HELPER LOCK: Target Full Year (Dikunci per tahun penuh agar tidak bergerak saat difilter)
         SUM(l.target_qty) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id) AS target_qty_fy,
         SUM(l.target_value) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id) AS target_val_fy,
 
-        -- ✨ HELPER CALCULATED: Proyeksi Run Rate Masa Depan
+        -- ✨ HELPER CALCULATED: Proyeksi Run Rate Otomatis untuk Masa Depan
         (SUM(CASE WHEN l.week <= c.cur_week THEN l.stm_qty ELSE 0 END) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) / NULLIF(c.cur_week, 0)) AS avg_qty_per_week_ytd,
         (SUM(CASE WHEN l.week <= c.cur_week THEN l.stm_value ELSE 0 END) OVER (PARTITION BY l.year, l.channel, l.sbu_id, l.grsm_id, l.rsm_id, l.ss_id, l.parent_id, l.brand_id, l.subbrand_id, l.flag_sku, l.distributor_id ORDER BY l.week ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) / NULLIF(c.cur_week, 0)) AS avg_val_per_week_ytd,
         
@@ -155,7 +158,7 @@ base_ly AS (
 ),
 
 horizontal_registry AS (
-    -- 🗜️ 5. JOIN HORIZONTAL MUTLAK CY, LY, DAN CLOSING LM
+    -- 🗜️ 8. JOIN HORIZONTAL UNTUK MERAPATKAN CY, LY, DAN CLOSING LM
     SELECT 
         ty.year, ty.period, ty.periodname, ty.week,
         ty.channel, ty.nsm_id, ty.nsm_name, ty.grsm_id, ty.grsm_name, ty.rsm_id, ty.rsm_name, ty.ss_id, ty.ss_name,
@@ -203,7 +206,7 @@ horizontal_registry AS (
         (ty.avg_val_per_week_ytd * ty.remaining_weeks_in_year) AS est_forward_val_calc,
         (ty.stm_val_ytd_ty + (ty.avg_val_per_week_ytd * ty.remaining_weeks_in_year)) AS est_full_year_val_calc,
         
-        -- 🛑 DATA CLOSING BULAN LALU (Aman lintas tahun dengan pengurangan Index 1)
+        -- 🛑 DATA CLOSING BULAN LALU (Tembus Lintas Tahun via Absolut Index Bulan)
         COALESCE(lm.total_target_qty_closing, 0) AS target_qty_lm,
         COALESCE(lm.total_stm_qty_closing, 0) AS stm_qty_lm,
         COALESCE(lm.total_target_val_closing, 0) AS target_val_lm,
@@ -217,7 +220,7 @@ horizontal_registry AS (
      AND ty.channel = ly.channel AND ty.parent_id = ly.parent_id AND ty.distributor_id = ly.distributor_id
      AND ty.brand_id = ly.brand_id AND ty.subbrand_id = ly.subbrand_id AND ty.flag_sku = ly.flag_sku
      
-    -- Join 2: Menarik data Bulan Lalu menggunakan Single Continuous Index
+    -- Join 2: Menarik data Bulan Lalu (Aman dari jebakan pergantian tahun kalender)
     LEFT JOIN closing_period_data lm 
       ON ((ty.year * 12) + ty.period) - 1 = lm.continuous_period_id
      AND ty.channel = lm.channel AND ty.parent_id = lm.parent_id AND ty.distributor_id = lm.distributor_id
@@ -225,7 +228,7 @@ horizontal_registry AS (
 ),
 
 unpivoted AS (
-    -- 🔵 UNPIVOT QTY
+    -- 🔵 UNPIVOT QTY SECTION
     SELECT 
         channel, year, period, periodname, week,
         nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -258,7 +261,7 @@ unpivoted AS (
         week AS urutan_filter_week,
         CASE WHEN year = cur_year AND week = cur_week THEN 1 ELSE 0 END AS is_current_week,
         
-        -- ✨ PENYEMATAN KOLOM HELPER BARU KE OUTPUT DATAMART
+        -- ✨ PENYEMATAN KOLOM HELPER PADA LEVEL GRANULAR QTY
         target_qty_fy AS target_full_year,
         target_qty_fy_ly AS target_full_year_ly,
         est_forward_qty_calc AS est_forward_calculated,
@@ -268,7 +271,7 @@ unpivoted AS (
 
     UNION ALL
 
-    -- 🟢 UNPIVOT VALUE
+    -- 🟢 UNPIVOT VALUE SECTION
     SELECT 
         channel, year, period, periodname, week,
         nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
@@ -285,9 +288,9 @@ unpivoted AS (
         stm_val_ly_orig AS stm_original_ly,
         
         target_val_ytd_ty AS target_ytd, 
-        stm_val_ytd_ty AS stm_val_ytd_ty, 
+        stm_val_ytd_ty AS stm_ytd, 
         target_val_ytd_ly AS target_ytd_ly,
-        stm_val_ytd_ly AS stm_val_ytd_ly,
+        stm_val_ytd_ly AS stm_ytd_ly,
         
         target_val_mtd_ty AS target_mtd, 
         stm_val_mtd_ty AS stm_mtd,
@@ -301,7 +304,7 @@ unpivoted AS (
         week AS urutan_filter_week,
         CASE WHEN year = cur_year AND week = cur_week THEN 1 ELSE 0 END AS is_current_week,
         
-        -- ✨ PENYEMATAN KOLOM HELPER BARU KE OUTPUT DATAMART
+        -- ✨ PENYEMATAN KOLOM HELPER PADA LEVEL GRANULAR VALUE
         target_val_fy AS target_full_year,
         target_val_fy_ly AS target_full_year_ly,
         est_forward_val_calc AS est_forward_calculated,
