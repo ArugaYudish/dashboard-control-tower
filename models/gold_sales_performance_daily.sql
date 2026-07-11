@@ -22,8 +22,10 @@ select
     s.parent_id, s.parent_name, s.pcode, s.pcodename, s.flag_sku,
     s.distributor_id, s.distributor_name,
     -- additive flows split evenly across the week's days
-    s.stm_qty   / wd.n_days         as stm_qty,
-    s.stm_value / wd.n_days         as stm_value,
+    s.stm_qty      / wd.n_days      as stm_qty,
+    s.stm_value    / wd.n_days      as stm_value,
+    s.target_qty   / wd.n_days      as target_qty,
+    s.target_value / wd.n_days      as target_value,     -- feeds the Achievement cards (stm/target)
     true                            as daily_is_estimated,  -- guardrail: flip false when real daily lands
     current_timestamp               as loaded_at
 from spx.silver_sales_performance s
