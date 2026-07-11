@@ -67,13 +67,6 @@ unpivoted_metrics AS (
 
 SELECT * FROM unpivoted_metrics
 
--- {{ config(
---     materialized='table',
---     alias='gold_performance_fdos',
---     indexes=[
---       {'columns': ['year', 'week', 'pilihan_satuan']}
---     ]
--- ) }}
 
 -- WITH current_operational AS (
 --     SELECT 
