@@ -2,7 +2,6 @@
     materialized='table',
     alias='gold_sales_target_performance',
     indexes=[
-        -- Ganti pcode menjadi parent_id karena tabel ini agregasi level parent
         {'columns': ['year', 'week', 'parent_id', 'pilihan_satuan']}
     ]
 ) }}
@@ -170,8 +169,6 @@ SELECT
     -- Jika toggle VALUE, stock_final akan me-load stock_value
     stock_value AS stock_final 
 FROM matrix_combined
-
-
 
 -- WITH current_operational AS (
 --     SELECT 
