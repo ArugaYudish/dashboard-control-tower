@@ -2,7 +2,7 @@
     materialized='table',
     alias='gold_performance_fdos',
     indexes=[
-      {'columns': ['year', 'week', 'pilihan_satuan']}
+      {'columns': ['year', 'week', 'pilihan_satuan', 'ss_id']}
     ]
 ) }}
 
@@ -16,7 +16,6 @@ WITH current_operational AS (
     LIMIT 1
 ),
 
--- Tarik data mentah dari silver parent yang kolomnya lengkap
 prep_data AS (
     SELECT 
         parent.*,
@@ -28,20 +27,18 @@ prep_data AS (
     CROSS JOIN current_operational c
 ),
 
--- Proses Unpivot Vertikal QTY dan VALUE
 unpivoted_metrics AS (
     -- Blok QTY
     SELECT 
-        channel, year, period, week, flag, distributor_id, parent_id,
-        nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
+        year, period, week, channel, flag_sku, flag, 
+        sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
+        nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, distributor_id, distributor_name,
         op_current_year, op_current_period, op_current_week, is_ytd,
         CURRENT_TIMESTAMP AS loaded_at,
         
         'QTY' AS pilihan_satuan,
         sta_qty AS sta_value_final,
         fdos_update AS fdos_value_final,
-        
-        -- Komponen SCD untuk QTY
         stock_qty AS stock_subdist_final,
         avg_5w_qty AS avg_stm_5w_final
     FROM prep_data
@@ -50,16 +47,15 @@ unpivoted_metrics AS (
 
     -- Blok VALUE
     SELECT 
-        channel, year, period, week, flag, distributor_id, parent_id,
-        nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
+        year, period, week, channel, flag_sku, flag, 
+        sbu_id, sbu_name, brand_id, brand_name, subbrand_id, subbrand_name, parent_id, parent_name,
+        nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, distributor_id, distributor_name,
         op_current_year, op_current_period, op_current_week, is_ytd,
         CURRENT_TIMESTAMP AS loaded_at,
         
         'VALUE' AS pilihan_satuan,
         sta_value AS sta_value_final,
         fdos_value AS fdos_value_final,
-        
-        -- Komponen SCD untuk VALUE
         stock_value AS stock_subdist_final,
         avg_5w_value AS avg_stm_5w_final
     FROM prep_data
