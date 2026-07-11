@@ -7,7 +7,7 @@
 
 with base as (
   select
-    channel, "year"::smallint as year, "period", periodname, week,
+    channel, "year"::int as year, "period"::int as "period", periodname, week::int as week,
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name,
     ss_id, ss_name, sbu_id, sbu_name, brand_id, brand_name,
     subbrand_id, subbrand_name, parent_id, parent_name,
@@ -56,7 +56,7 @@ cy_rows as (
 -- e.g. 2025 week 27-52 when cy=2026 — shows stm_current as NULL
 py_orphan_rows as (
   select
-    (py.year + 1)::smallint as year,   -- ref_year = the cy the user will filter on
+    (py.year + 1)::int as year,   -- ref_year = the cy the user will filter on
     py.channel, py."period", py.periodname, py.week,
     py.nsm_id, py.nsm_name, py.grsm_id, py.grsm_name, py.rsm_id, py.rsm_name,
     py.ss_id, py.ss_name, py.sbu_id, py.sbu_name, py.brand_id, py.brand_name,
