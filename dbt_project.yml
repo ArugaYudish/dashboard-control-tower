@@ -18,6 +18,13 @@ seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
+seeds:
+  dashboard:
+    division_group_map:
+      +column_types:
+        div_id: varchar
+        m_group: varchar
+
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
