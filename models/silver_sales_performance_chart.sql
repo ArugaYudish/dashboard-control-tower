@@ -15,7 +15,7 @@ with base as (
     distributor_id, distributor_name,
     target_qty, salfo_qty, sta_qty, stm_qty,
     stock_qty as stock_subdist, stock_ibn,
-    stock_subdist / nullif(avg_5w_qty, 0) * 6     as scd_subdist_ratio,
+    stock_qty / nullif(avg_5w_qty, 0) * 6     as scd_subdist_ratio,
     stock_ibn     / nullif(avg_5w_sta_qty, 0) * 6 as scd_ibn_ratio
   from {{ ref('silver_sales_performance_parent') }}
 ),
