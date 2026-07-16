@@ -10,23 +10,25 @@ with cycle_ranked as (
   	end as flag
   from spx.m_cycle3
   where year between extract(year from current_date) - 1
-                 and extract(year from current_date)
+                 and extract(year from current_date)         
   group by year, week, period
 ),
-cur as (
-  select rn as cur_rn
-  from cycle_ranked
-  where week_start <= current_date
-  order by week_start desc
-  limit 1
+-- For every target week, list the source weeks feeding its rolling averages:
+-- 5w window = rn-6..rn-2, 13w window = rn-14..rn-2 (current and previous week excluded).
+week_windows as (
+  select w.year, w.week,
+         src.year as src_year, src.week as src_week,
+         (src.rn between w.rn - 6  and w.rn - 2) as in_5w,
+         (src.rn between w.rn - 14 and w.rn - 2) as in_13w
+  from cycle_ranked w
+  join cycle_ranked src on src.rn between w.rn - 14 and w.rn - 2
 ),
-window_weeks as (
-  select cr.year, cr.week,
-         (cr.rn between cur.cur_rn - 6  and cur.cur_rn - 2) as in_5w,
-         (cr.rn between cur.cur_rn - 14 and cur.cur_rn - 2) as in_13w
-  from cycle_ranked cr
-  cross join cur
-  where cr.rn between cur.cur_rn - 14 and cur.cur_rn - 2
+window_counts as (
+  select year, week,
+         count(*) filter (where in_5w)  as n_5w,
+         count(*) filter (where in_13w) as n_13w
+  from week_windows
+  group by year, week
 ),
 sales_hierarchy as (
 	select distinct mp.parent_id, vshp.ss_id, vshp.nsm_id, vshp.rsm_id , vshp.grsm_id, ss_name, nsm_name, rsm_name, grsm_name, distributor_id 
@@ -64,16 +66,16 @@ select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(omsetqty) as
 	group by a.year, a.period, a.week, a.distributor_id, a.parent_id 
 ),
 avgs as (
-  select s.distributor_id, s.parent_id,
-         sum(s.stm_qty)   filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_qty,
-         sum(s.stm_value) filter (where w.in_5w)::numeric  / nullif((select count(*) from window_weeks where in_5w),  0) as avg_5w_value,
-         sum(s.stm_qty)   filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_qty,
-         sum(s.stm_value) filter (where w.in_13w)::numeric / nullif((select count(*) from window_weeks where in_13w), 0) as avg_13w_value
-  from stm s
-  join window_weeks w
-    on s.year = w.year and s.week = w.week
+  select ww.year, ww.week, s.distributor_id, s.parent_id,
+         sum(s.stm_qty)   filter (where ww.in_5w)::numeric  / nullif(wc.n_5w,  0) as avg_5w_qty,
+         sum(s.stm_value) filter (where ww.in_5w)::numeric  / nullif(wc.n_5w,  0) as avg_5w_value,
+         sum(s.stm_qty)   filter (where ww.in_13w)::numeric / nullif(wc.n_13w, 0) as avg_13w_qty,
+         sum(s.stm_value) filter (where ww.in_13w)::numeric / nullif(wc.n_13w, 0) as avg_13w_value
+  from week_windows ww
+  join window_counts wc on wc.year = ww.year and wc.week = ww.week
+  join stm s on s.year = ww.src_year and s.week = ww.src_week
   where s.parent_id is not null
-  group by s.distributor_id, s.parent_id
+  group by ww.year, ww.week, s.distributor_id, s.parent_id, wc.n_5w, wc.n_13w
 ),
 wh_stock as (
    select a.year, a.week, a.parent_id, SUM(a.qty) as stock_ibn, SUM(a.qty_value) as stock_ibn_value 
@@ -92,13 +94,12 @@ omset_ibn as (
   group by a.year, a.week, mp.parent_id, distributor_id	
 ),
 avgs_ibn as (
-  select oi.parent_id, oi.distributor_id,
-         avg(oi.sta_qty) filter (where w.in_5w) as avg_5w_sta_qty,
-         avg(oi.sta_value) filter (where w.in_5w) as avg_5w_sta_value
-  from omset_ibn oi
-  join window_weeks w
-    on oi.year = w.year and oi.week = w.week
-  group by oi.parent_id, oi.distributor_id
+  select ww.year, ww.week, oi.parent_id, oi.distributor_id,
+         avg(oi.sta_qty)   filter (where ww.in_5w) as avg_5w_sta_qty,
+         avg(oi.sta_value) filter (where ww.in_5w) as avg_5w_sta_value
+  from week_windows ww
+  join omset_ibn oi on oi.year = ww.src_year and oi.week = ww.src_week
+  group by ww.year, ww.week, oi.parent_id, oi.distributor_id
 ),
 fdos as
 (
