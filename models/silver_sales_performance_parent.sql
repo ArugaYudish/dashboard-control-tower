@@ -112,6 +112,17 @@ select vfu.year, vfu.period, vfu.week, vfu.distributor_id, mp.pcode, mp.parent_i
   left join spx.m_price_divisi mpd on vfu.pcode = mpd.pcode and vfu.year = mpd.year and md.sls_div = mpd.sls_div
  ) a
  GROUP BY a.year, a.period, a.week, a.distributor_id, a.parent_id
+),
+extra_keys as (
+  -- distinct keys present in any subdist-level source; used to surface rows that exist in
+  -- these sources but have no matching target (voswb) row for the same year/week/parent/distributor.
+  select year, week, parent_id, distributor_id from omset_ibn
+  union
+  select year, week, parent_id, distributor_id from salfo
+  union
+  select year, week, parent_id, distributor_id from stm
+  union
+  select year, week, parent_id, distributor_id from stock
 )
 select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName,voswb.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
@@ -148,40 +159,42 @@ left join avgs_ibn aibn on voswb.parent_id = aibn.parent_id and voswb.distributo
 
 union all
 
--- omset_ibn rows that have no matching target (voswb) row for the same year/week/parent/distributor.
--- These are dropped by the target-driven query above; bring them back here with targets left NULL
--- and every other metric mirrored on the same key.
-select md.sls_div as channel, oi.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName, oi.week,
+-- Rows present in any subdist-level source (omset_ibn, salfo, stm, stock) but with no matching
+-- target (voswb) row for the same year/week/parent/distributor. These are dropped by the
+-- target-driven query above; bring them back here with targets left NULL and every metric
+-- mirrored on the same key. extra_keys is DISTINCT, so a key found in several sources yields one row.
+select md.sls_div as channel, ek.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName, ek.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
        mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name,
        mp.parent_id, mparent.parent_nm as parent_name, mp.flag_season as flag_sku,
-       oi.distributor_id, md.distributor_nm as distributor_name, null as target_qty, null as target_value,
+       ek.distributor_id, md.distributor_nm as distributor_name, null as target_qty, null as target_value,
        round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
        stm.stm_qty, stm.stm_value,
        ws.stock_ibn, ws.stock_ibn_value, fdos.fdos_update, fdos.fdos_value, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
        stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at, cr.flag
-from omset_ibn oi
-join (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp on mp.parent_id = oi.parent_id
-join cycle_ranked cr on oi.year = cr.year and oi.week = cr.week
-join spx.m_distributor md on oi.distributor_id = md.distributor_id
+from extra_keys ek
+join (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp on mp.parent_id = ek.parent_id
+join cycle_ranked cr on ek.year = cr.year and ek.week = cr.week
+join spx.m_distributor md on ek.distributor_id = md.distributor_id
 left join spx.m_division mdiv on mdiv.div_id = mp.div_id
 left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
 left join spx.m_subbrand msubbrand
   on  msubbrand.subbrand_id = mp.subbrand_id
   and msubbrand.brand_id    = mp.brand_id
 left join spx.m_parent mparent on mparent.parent_id = mp.parent_id
-left join sales_hierarchy vsh on oi.distributor_id = vsh.distributor_id and oi.parent_id = vsh.parent_id
-left join stm on oi.year = stm.year and oi.week = stm.week and oi.distributor_id = stm.distributor_id and oi.parent_id = stm.parent_id
-left join salfo on oi.year = salfo.year and oi.week = salfo.week and oi.distributor_id = salfo.distributor_id and oi.parent_id = salfo.parent_id
-left join stock on oi.year = stock.year and oi.week = stock.week and oi.distributor_id = stock.distributor_id and oi.parent_id = stock.parent_id
-left join fdos on oi.year = fdos.year and oi.week = fdos.week and oi.distributor_id = fdos.distributor_id and oi.parent_id = fdos.parent_id
+left join sales_hierarchy vsh on ek.distributor_id = vsh.distributor_id and ek.parent_id = vsh.parent_id
+left join omset_ibn oi on ek.year = oi.year and ek.week = oi.week and ek.distributor_id = oi.distributor_id and ek.parent_id = oi.parent_id
+left join stm on ek.year = stm.year and ek.week = stm.week and ek.distributor_id = stm.distributor_id and ek.parent_id = stm.parent_id
+left join salfo on ek.year = salfo.year and ek.week = salfo.week and ek.distributor_id = salfo.distributor_id and ek.parent_id = salfo.parent_id
+left join stock on ek.year = stock.year and ek.week = stock.week and ek.distributor_id = stock.distributor_id and ek.parent_id = stock.parent_id
+left join fdos on ek.year = fdos.year and ek.week = fdos.week and ek.distributor_id = fdos.distributor_id and ek.parent_id = fdos.parent_id
 left join wh_stock ws
-  on oi.year = ws.year and oi.week = ws.week and oi.parent_id = ws.parent_id
+  on ek.year = ws.year and ek.week = ws.week and ek.parent_id = ws.parent_id
 left join avgs a
-  on a.distributor_id = oi.distributor_id and a.parent_id = oi.parent_id
-left join avgs_ibn aibn on oi.parent_id = aibn.parent_id and oi.distributor_id = aibn.distributor_id
+  on a.distributor_id = ek.distributor_id and a.parent_id = ek.parent_id
+left join avgs_ibn aibn on ek.parent_id = aibn.parent_id and ek.distributor_id = aibn.distributor_id
 where not exists (
   select 1 from spx.v_target_weekly_by_parent v
-  where v.year = oi.year and v.week = oi.week
-    and v.parent_id = oi.parent_id and v.distributor_id = oi.distributor_id
+  where v.year = ek.year and v.week = ek.week
+    and v.parent_id = ek.parent_id and v.distributor_id = ek.distributor_id
 )
