@@ -145,4 +145,4 @@ left join omset_ibn oi
 left join avgs a
   on a.distributor_id = voswb.distributor_id and a.parent_id = voswb.parent_id
 left join avgs_ibn aibn on voswb.parent_id = aibn.parent_id and voswb.distributor_id = aibn.distributor_id
-where mp.div_id in ('01','02','03','04','18', '21')
+where mp.div_id not in ('01','02','03','04','18', '21')
