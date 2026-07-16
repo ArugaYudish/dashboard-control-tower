@@ -1,3 +1,7 @@
+{{ config(
+    materialized='table'
+) }}
+
 with week_days as (                       -- divisor: how many days in each (year, week)
     select year, week, count(*) as n_days
     from spx.m_cycle3
