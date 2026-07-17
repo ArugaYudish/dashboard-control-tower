@@ -155,8 +155,11 @@ left join omset_ibn oi
   on voswb.year = oi.year and voswb.week = oi.week
   and voswb.parent_id = oi.parent_id and voswb.distributor_id = oi.distributor_id
 left join avgs a
-  on a.distributor_id = voswb.distributor_id and a.parent_id = voswb.parent_id
-left join avgs_ibn aibn on voswb.parent_id = aibn.parent_id and voswb.distributor_id = aibn.distributor_id
+  on a.year = voswb.year and a.week = voswb.week
+  and a.distributor_id = voswb.distributor_id and a.parent_id = voswb.parent_id
+left join avgs_ibn aibn
+  on aibn.year = voswb.year and aibn.week = voswb.week
+  and voswb.parent_id = aibn.parent_id and voswb.distributor_id = aibn.distributor_id
 
 union all
 
@@ -192,8 +195,11 @@ left join fdos on ek.year = fdos.year and ek.week = fdos.week and ek.distributor
 left join wh_stock ws
   on ek.year = ws.year and ek.week = ws.week and ek.parent_id = ws.parent_id
 left join avgs a
-  on a.distributor_id = ek.distributor_id and a.parent_id = ek.parent_id
-left join avgs_ibn aibn on ek.parent_id = aibn.parent_id and ek.distributor_id = aibn.distributor_id
+  on a.year = ek.year and a.week = ek.week
+  and a.distributor_id = ek.distributor_id and a.parent_id = ek.parent_id
+left join avgs_ibn aibn
+  on aibn.year = ek.year and aibn.week = ek.week
+  and ek.parent_id = aibn.parent_id and ek.distributor_id = aibn.distributor_id
 where not exists (
   select 1 from spx.v_target_weekly_by_parent v
   where v.year = ek.year and v.week = ek.week
