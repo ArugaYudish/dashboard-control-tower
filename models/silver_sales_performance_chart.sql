@@ -75,7 +75,7 @@ py_orphan_rows as (
     null::numeric  as stock_subdist,
     null::numeric  as stock_ibn,
     null::float    as scd,
-    py.avg_5w_qty
+    py.avg_5w_qty,py.avg_5w_sta_qty
   from base py
   -- only generate orphan rows when the next year actually exists in data
   inner join years_in_data yid on yid.year = py.year + 1
