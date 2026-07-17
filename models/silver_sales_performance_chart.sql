@@ -15,8 +15,11 @@ with base as (
     distributor_id, distributor_name,
     target_qty, salfo_qty, sta_qty, stm_qty,
     stock_qty as stock_subdist, stock_ibn,
-    stock_qty / (nullif(avg_5w_qty, 0) / 6)     as scd_subdist_ratio,
-    stock_ibn     / (nullif(avg_5w_sta_qty, 0) / 6) as scd_ibn_ratio
+    avg_5w_qty,avg_5w_sta_qty,
+    case when nullif(avg_5w_qty, 0) = 0 then 0 else 
+    stock_qty / (nullif(avg_5w_qty, 0) / 6) end    as scd_subdist_ratio,
+    case when nullif(avg_5w_sta_qty, 0) = 0 then 0 else    
+    stock_ibn     / (nullif(avg_5w_sta_qty, 0) / 6) end as scd_ibn_ratio
   from {{ ref('silver_sales_performance_parent') }}
 ),
 
@@ -41,7 +44,8 @@ cy_rows as (
     py.stm_qty       as stm_prev,
     cy.stock_subdist,
     cy.stock_ibn,
-    cast(cy.scd_subdist_ratio as float) as scd
+    cast(cy.scd_subdist_ratio as float) as scd,
+    cy.avg_5w_qty,cy.avg_5w_sta_qty
   from base cy
   left join base py
     on  py.year          = cy.year - 1
@@ -70,7 +74,8 @@ py_orphan_rows as (
     py.stm_qty     as stm_prev,
     null::numeric  as stock_subdist,
     null::numeric  as stock_ibn,
-    null::float    as scd
+    null::float    as scd,
+    py.avg_5w_qty
   from base py
   -- only generate orphan rows when the next year actually exists in data
   inner join years_in_data yid on yid.year = py.year + 1
