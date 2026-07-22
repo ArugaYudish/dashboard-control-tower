@@ -14,12 +14,19 @@ with base as (
     flag_sku,
     distributor_id, distributor_name,
     target_qty, salfo_qty, sta_qty, stm_qty,
+    target_value, salfo_value, sta_value, stm_value,
     stock_qty as stock_subdist, stock_ibn,
+    stock_value as stock_subdist_value, stock_ibn_value,
     avg_5w_qty,avg_5w_sta_qty,
-    case when nullif(avg_5w_qty, 0) = 0 then 0 else 
+    avg_5w_value,avg_5w_sta_value,
+    case when nullif(avg_5w_qty, 0) = 0 then 0 else
     stock_qty / (nullif(avg_5w_qty, 0) / 6) end    as scd_subdist_ratio,
-    case when nullif(avg_5w_sta_qty, 0) = 0 then 0 else    
-    stock_ibn     / (nullif(avg_5w_sta_qty, 0) / 6) end as scd_ibn_ratio
+    case when nullif(avg_5w_sta_qty, 0) = 0 then 0 else
+    stock_ibn     / (nullif(avg_5w_sta_qty, 0) / 6) end as scd_ibn_ratio,
+    case when nullif(avg_5w_value, 0) = 0 then 0 else
+    stock_value   / (nullif(avg_5w_value, 0) / 6) end   as scd_subdist_value_ratio,
+    case when nullif(avg_5w_sta_value, 0) = 0 then 0 else
+    stock_ibn_value / (nullif(avg_5w_sta_value, 0) / 6) end as scd_ibn_value_ratio
   from {{ ref('silver_sales_performance_parent') }}
 ),
 
@@ -38,14 +45,23 @@ cy_rows as (
     cy.flag_sku,
     cy.distributor_id, cy.distributor_name,
     cy.target_qty    as budget,
+    cy.target_value  as budget_value,
     cy.salfo_qty     as salfo,
+    cy.salfo_value   as salfo_value,
     cy.sta_qty       as sta,
+    cy.sta_value     as sta_value,
     cy.stm_qty       as stm_current,
+    cy.stm_value     as stm_current_value,
     py.stm_qty       as stm_prev,
+    py.stm_value     as stm_prev_value,
     cy.stock_subdist,
+    cy.stock_subdist_value,
     cy.stock_ibn,
-    cast(cy.scd_subdist_ratio as float) as scd,
-    cy.avg_5w_qty,cy.avg_5w_sta_qty
+    cy.stock_ibn_value,
+    cast(cy.scd_subdist_ratio as float)       as scd,
+    cast(cy.scd_subdist_value_ratio as float) as scd_value,
+    cy.avg_5w_qty,cy.avg_5w_sta_qty,
+    cy.avg_5w_value,cy.avg_5w_sta_value
   from base cy
   left join base py
     on  py.year          = cy.year - 1
@@ -68,14 +84,23 @@ py_orphan_rows as (
     py.flag_sku,
     py.distributor_id, py.distributor_name,
     null::numeric  as budget,
+    null::numeric  as budget_value,
     null::numeric  as salfo,
+    null::numeric  as salfo_value,
     null::numeric  as sta,
+    null::numeric  as sta_value,
     null::numeric  as stm_current,
+    null::numeric  as stm_current_value,
     py.stm_qty     as stm_prev,
+    py.stm_value   as stm_prev_value,
     null::numeric  as stock_subdist,
+    null::numeric  as stock_subdist_value,
     null::numeric  as stock_ibn,
+    null::numeric  as stock_ibn_value,
     null::float    as scd,
-    py.avg_5w_qty,py.avg_5w_sta_qty
+    null::float    as scd_value,
+    py.avg_5w_qty,py.avg_5w_sta_qty,
+    py.avg_5w_value,py.avg_5w_sta_value
   from base py
   -- only generate orphan rows when the next year actually exists in data
   inner join years_in_data yid on yid.year = py.year + 1
