@@ -81,8 +81,8 @@ wh_stock as (
    select a.year, a.week, a.parent_id, SUM(a.qty) as stock_ibn, SUM(a.qty_value) as stock_ibn_value 
   from 
   (
-  select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty, (a.qty * coalesce(mpd.price,0)) as qty_value
-  from spx.t_stock_wh a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
+  select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty+a.git_qty as qty, ((a.qty+a.git_qty) * coalesce(mpd.price,0)) as qty_value
+  from spx.t_stock_wh_fdisupd a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
      left join spx.m_price_divisi mpd on a.year = mpd.year and mp.sls_div = mpd.sls_div and a.pcode = mp.pcode
   ) a   
   group by a.year, a.week, a.parent_id

@@ -11,8 +11,9 @@ with cycle_week as materialized (
       when year = extract(year from current_date) - 1 then 'ly'
     end as flag
   from spx.m_cycle3
-  where year between extract(year from current_date) - 1
-                 and extract(year from current_date)
+  where (year * 12 + period)
+    between (extract(year from current_date) * 12 + extract(month from current_date)) - 6
+        and (extract(year from current_date) * 12 + extract(month from current_date))
 ),
 product_hierarchy as (
   select distinct
