@@ -1,7 +1,7 @@
 {{ config(
     materialized='table',
     post_hook=[
-      "CREATE INDEX IF NOT EXISTS ix_sspc ON {{ this }} (\"year\", channel, \"period\", week, parent_id, distributor_id)"
+      "CREATE INDEX IF NOT EXISTS ix_sspc ON {{ this }} (\"year\", channel, \"period\", week, parent_id, distributor_id, sbu_id, brand_id, subbrand_id, flag_sku)"
     ]
 ) }}
 
@@ -70,6 +70,16 @@ cy_rows as (
     and py.week          = cy.week
     and py.parent_id     = cy.parent_id
     and py.distributor_id = cy.distributor_id
+    -- Product attributes are part of the parent's grain: one parent can span several
+    -- subbrands/brands/sbus. Without these, each cy row matches every py row for the
+    -- parent and stm_current is counted once per prior-year row (observed 4x).
+    -- IS NOT DISTINCT FROM = NULL-safe equality; these arrive via left join and can be NULL,
+    -- and plain `=` would silently drop stm_prev. Sales hierarchy is deliberately excluded --
+    -- territory is legitimately reassigned year over year and would blank stm_prev.
+    and py.sbu_id      is not distinct from cy.sbu_id
+    and py.brand_id    is not distinct from cy.brand_id
+    and py.subbrand_id is not distinct from cy.subbrand_id
+    and py.flag_sku    is not distinct from cy.flag_sku
 ),
 
 -- Part 2: prev-year weeks with NO matching current-year row
@@ -113,6 +123,12 @@ py_orphan_rows as (
       and cy.week          = py.week
       and cy.parent_id     = py.parent_id
       and cy.distributor_id = py.distributor_id
+      -- must mirror the cy_rows join key exactly, or Part 1 and Part 2 disagree about
+      -- what counts as "already handled" and orphan rows get both dropped and duplicated
+      and cy.sbu_id      is not distinct from py.sbu_id
+      and cy.brand_id    is not distinct from py.brand_id
+      and cy.subbrand_id is not distinct from py.subbrand_id
+      and cy.flag_sku    is not distinct from py.flag_sku
   )
 )
 

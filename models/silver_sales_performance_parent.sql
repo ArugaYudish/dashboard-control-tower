@@ -1,5 +1,14 @@
 {{ config(materialized='table') }}
 
+-- Grain: one row per (year, channel, period, week, product-group, distributor_id)
+-- where product-group = (div_id, brand_id, subbrand_id, parent_id, flag_season).
+--
+-- Every metric is rolled up from pcode to that grain. Previously the model drove off
+-- `select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from m_product`
+-- but joined metrics on parent_id alone, so a parent whose SKUs span >1 subbrand had its
+-- single parent-level value COPIED onto each row instead of split -- inflating every sum
+-- by the number of product groups under that parent (up to 5x; 123 of 1876 parents affected).
+
 with cycle_ranked as (
   select year, week, period,
          min(cdate) as week_start,
@@ -10,7 +19,7 @@ with cycle_ranked as (
   	end as flag
   from spx.m_cycle3
   where year between extract(year from current_date) - 1
-                 and extract(year from current_date)         
+                 and extract(year from current_date)
   group by year, week, period
 ),
 -- For every target week, list the source weeks feeding its rolling averages:
@@ -30,43 +39,89 @@ window_counts as (
   from week_windows
   group by year, week
 ),
-sales_hierarchy as (
-	select distinct mp.parent_id, vshp.ss_id, vshp.nsm_id, vshp.rsm_id , vshp.grsm_id, ss_name, nsm_name, rsm_name, grsm_name, distributor_id 
-	 from spx.v_sales_hierarchy_product vshp left join spx.m_product mp on vshp.pcode = mp.pcode	
+
+-- pcode -> its product group. pg_key is a NULL-safe surrogate for the 5-column group:
+-- div_id/brand_id/subbrand_id/flag_season are nullable, and joining them with plain `=`
+-- would silently drop those rows, while IS NOT DISTINCT FROM would block hash joins.
+pcode_pg as (
+  select distinct pcode, div_id, brand_id, subbrand_id, parent_id, flag_season,
+         md5(coalesce(div_id::text,      '~') || '|' ||
+             coalesce(brand_id::text,    '~') || '|' ||
+             coalesce(subbrand_id::text, '~') || '|' ||
+             parent_id::text                  || '|' ||
+             coalesce(flag_season::text, '~')) as pg_key
+  from spx.m_product
+  where parent_id is not null
 ),
+pg_dim as (
+  select distinct pg_key, div_id, brand_id, subbrand_id, parent_id, flag_season
+  from pcode_pg
+),
+-- One designated product group per parent. Targets are only available at parent grain
+-- (v_target_weekly_by_parent has no pcode), so they attach here and are NULL elsewhere --
+-- that keeps sum(target_qty) exact at parent level instead of multiplying it.
+-- `nulls last` makes the pick deterministic across rebuilds.
+pg_primary as (
+  select parent_id, pg_key
+  from (
+    select parent_id, pg_key,
+           row_number() over (
+             partition by parent_id
+             order by div_id nulls last, brand_id nulls last,
+                      subbrand_id nulls last, flag_season nulls last
+           ) as rn
+    from pg_dim
+  ) t
+  where rn = 1
+),
+-- One hierarchy row per product group + distributor. 73 keys map to two salesmen for the
+-- same pcode (Beverage, div_id 10); only ss_id ever differs -- nsm/grsm/rsm are identical
+-- within every affected key -- so this picks a stable ss_id and no dimension above salesman
+-- moves. Presentation collapse only: the underlying mapping in v_sales_hierarchy_product
+-- is untouched.
+sales_hierarchy as (
+  select distinct on (pg.pg_key, v.distributor_id)
+         pg.pg_key, v.distributor_id,
+         v.nsm_id, v.nsm_name, v.grsm_id, v.grsm_name,
+         v.rsm_id, v.rsm_name, v.ss_id, v.ss_name
+  from spx.v_sales_hierarchy_product v
+  join pcode_pg pg on v.pcode = pg.pcode
+  order by pg.pg_key, v.distributor_id, v.ss_id nulls last
+),
+
 salfo as (
-	select year, week, parent_id, distributor_id, sum(qty) as salfo_qty, sum(salfo_value) as salfo_value
-	from 
+	select year, week, pg_key, distributor_id, sum(qty) as salfo_qty, sum(salfo_value) as salfo_value
+	from
 	(
-	select vscw.year, vscw.week, vscw.pcode, p.parent_id, vscw.distributor_id, coalesce(vscw.qty,0) as qty, coalesce(vscw.qty,0)*coalesce(mp.price,0) as salfo_value
-	 from spx.v_salfo_confirm_weekly vscw inner join cycle_ranked cr on vscw.year = cr.year and vscw.week = cr.week left join spx.m_product p on vscw.pcode = p.pcode
-		left join spx.m_distributor md on vscw.distributor_id = md.distributor_id  
+	select vscw.year, vscw.week, vscw.pcode, pg.pg_key, vscw.distributor_id, coalesce(vscw.qty,0) as qty, coalesce(vscw.qty,0)*coalesce(mp.price,0) as salfo_value
+	 from spx.v_salfo_confirm_weekly vscw inner join cycle_ranked cr on vscw.year = cr.year and vscw.week = cr.week join pcode_pg pg on vscw.pcode = pg.pcode
+		left join spx.m_distributor md on vscw.distributor_id = md.distributor_id
 		left join spx.m_price_divisi mp on vscw.year = mp.year and md.sls_div = mp.sls_div and vscw.pcode = mp.pcode
 	) a
-	group by year, week, parent_id, distributor_id
+	group by year, week, pg_key, distributor_id
 ),
 stock as (
-	select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(qty) as stock_qty, sum(qty_value) as stock_value
-	from 
+	select a.year, a.week, a.distributor_id, a.pg_key, sum(qty) as stock_qty, sum(qty_value) as stock_value
+	from
 	(
-	select vss.year, vss.period, vss.week, vss.sub_id as distributor_id, vss.pcode, p.parent_id, vss.qty, (vss.qty * mp.price) as qty_value
-	 from spx.v_stock_dist vss inner join cycle_ranked cr on vss.year = cr.year and vss.week = cr.week left join spx.m_product p on vss.pcode = p.pcode
-			left join spx.m_distributor md on vss.sub_id = md.distributor_id  
+	select vss.year, vss.week, vss.sub_id as distributor_id, vss.pcode, pg.pg_key, vss.qty, (vss.qty * mp.price) as qty_value
+	 from spx.v_stock_dist vss inner join cycle_ranked cr on vss.year = cr.year and vss.week = cr.week join pcode_pg pg on vss.pcode = pg.pcode
+			left join spx.m_distributor md on vss.sub_id = md.distributor_id
 			left join spx.m_price_divisi mp on vss.year = mp.year and md.sls_div = mp.sls_div and vss.pcode = mp.pcode
-	) a	
-	group by a.year, a.period, a.week, a.distributor_id, a.parent_id 
+	) a
+	group by a.year, a.week, a.distributor_id, a.pg_key
 ),
 stm as (
-select a.year, a.period, a.week, a.distributor_id, a.parent_id, sum(omsetqty) as stm_qty, sum(qty_value) as stm_value
-	from 
+select a.year, a.week, a.distributor_id, a.pg_key, sum(omsetqty) as stm_qty, sum(qty_value) as stm_value
+	from
 	(
-	select cast(vss.tahun as int) as year, vss.periode as period, cast(vss.week as int) as week, vss.distributor_id, vss.pcode, p.parent_id, vss.omsetqty, vss.omsetvalue as qty_value
-	 from spx.v_omset_subdist_weekly_bw vss inner join cycle_ranked cr on cast(vss.tahun as int) = cr.year and cast(vss.week as int) = cr.week left join spx.m_product p on vss.pcode = p.pcode			
-	) a	
-	group by a.year, a.period, a.week, a.distributor_id, a.parent_id 
+	select cast(vss.tahun as int) as year, cast(vss.week as int) as week, vss.distributor_id, vss.pcode, pg.pg_key, vss.omsetqty, vss.omsetvalue as qty_value
+	 from spx.v_omset_subdist_weekly_bw vss inner join cycle_ranked cr on cast(vss.tahun as int) = cr.year and cast(vss.week as int) = cr.week join pcode_pg pg on vss.pcode = pg.pcode
+	) a
+	group by a.year, a.week, a.distributor_id, a.pg_key
 ),
 avgs as (
-  select ww.year, ww.week, s.distributor_id, s.parent_id,
+  select ww.year, ww.week, s.distributor_id, s.pg_key,
          sum(s.stm_qty)   filter (where ww.in_5w)::numeric  / nullif(wc.n_5w,  0) as avg_5w_qty,
          sum(s.stm_value) filter (where ww.in_5w)::numeric  / nullif(wc.n_5w,  0) as avg_5w_value,
          sum(s.stm_qty)   filter (where ww.in_13w)::numeric / nullif(wc.n_13w, 0) as avg_13w_qty,
@@ -74,134 +129,108 @@ avgs as (
   from week_windows ww
   join window_counts wc on wc.year = ww.year and wc.week = ww.week
   join stm s on s.year = ww.src_year and s.week = ww.src_week
-  where s.parent_id is not null
-  group by ww.year, ww.week, s.distributor_id, s.parent_id, wc.n_5w, wc.n_13w
+  group by ww.year, ww.week, s.distributor_id, s.pg_key, wc.n_5w, wc.n_13w
 ),
+-- Unchanged: keyed on parent_id with no distributor, so stock_ibn is still replicated
+-- across distributors and product groups (pre-existing; out of scope -- never SUM it
+-- across distributors). The m_price_divisi join below is also mis-keyed on `mp.pcode`
+-- (m_product) instead of `mpd.pcode` -- deferred, tracked separately.
 wh_stock as (
-   select a.year, a.week, a.parent_id, SUM(a.qty) as stock_ibn, SUM(a.qty_value) as stock_ibn_value 
-  from 
+   select a.year, a.week, a.parent_id, SUM(a.qty) as stock_ibn, SUM(a.qty_value) as stock_ibn_value
+  from
   (
   select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty+a.git_qty as qty, ((a.qty+a.git_qty) * coalesce(mpd.price,0)) as qty_value
   from spx.t_stock_wh_fdisupd a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
      left join spx.m_price_divisi mpd on a.year = mpd.year and mp.sls_div = mpd.sls_div and a.pcode = mp.pcode
-  ) a   
+  ) a
   group by a.year, a.week, a.parent_id
 ),
 omset_ibn as (
-  select a.year, a.week, mp.parent_id, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
-  from spx.m_sta_subdist a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week 
-  	join spx.m_product mp on a.pcode = mp.pcode
-  group by a.year, a.week, mp.parent_id, distributor_id	
+  select a.year, a.week, pg.pg_key, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
+  from spx.m_sta_subdist a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week
+  	join pcode_pg pg on a.pcode = pg.pcode
+  group by a.year, a.week, pg.pg_key, distributor_id
 ),
 avgs_ibn as (
-  select ww.year, ww.week, oi.parent_id, oi.distributor_id,
+  select ww.year, ww.week, oi.pg_key, oi.distributor_id,
          avg(oi.sta_qty)   filter (where ww.in_5w) as avg_5w_sta_qty,
          avg(oi.sta_value) filter (where ww.in_5w) as avg_5w_sta_value
   from week_windows ww
   join omset_ibn oi on oi.year = ww.src_year and oi.week = ww.src_week
-  group by ww.year, ww.week, oi.parent_id, oi.distributor_id
+  group by ww.year, ww.week, oi.pg_key, oi.distributor_id
 ),
 fdos as
 (
-  SELECT a.year, a.period, a.week, a.distributor_id, a.parent_id, SUM(a.fdos_update) as fdos_update, SUM(a.fdos_value) as fdos_value
-  FROM ( 
-select vfu.year, vfu.period, vfu.week, vfu.distributor_id, mp.pcode, mp.parent_id, vfu.fdos_update, vfu.fdos_update * coalesce(mpd.price,0) as fdos_value 
-   from spx.v_fdos_update vfu 
+  SELECT a.year, a.week, a.distributor_id, a.pg_key, SUM(a.fdos_update) as fdos_update, SUM(a.fdos_value) as fdos_value
+  FROM (
+select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_key, vfu.fdos_update, vfu.fdos_update * coalesce(mpd.price,0) as fdos_value
+   from spx.v_fdos_update vfu
  	inner join cycle_ranked cw on vfu.year = cw.year and vfu.period = cw.period and vfu.week = cw.week
-	inner join spx.m_product mp on vfu.pcode = mp.pcode
+	inner join pcode_pg pg on vfu.pcode = pg.pcode
   inner join spx.m_distributor md on vfu.distributor_id = md.distributor_id
   left join spx.m_price_divisi mpd on vfu.pcode = mpd.pcode and vfu.year = mpd.year and md.sls_div = mpd.sls_div
  ) a
- GROUP BY a.year, a.period, a.week, a.distributor_id, a.parent_id
+ GROUP BY a.year, a.week, a.distributor_id, a.pg_key
 ),
-extra_keys as (
-  -- distinct keys present in any subdist-level source; used to surface rows that exist in
-  -- these sources but have no matching target (voswb) row for the same year/week/parent/distributor.
-  select year, week, parent_id, distributor_id from omset_ibn
+-- Parent-grain target pinned onto the designated product group.
+target as (
+  select v.year, v.week, v.distributor_id, p.pg_key, v.target_qty, v.target_value
+  from spx.v_target_weekly_by_parent v
+  join pg_primary p on p.parent_id = v.parent_id
+),
+-- Every key present in any source. Replaces the old target-driven select + `extra_keys`
+-- mirror, which duplicated ~75 lines of SELECT and could drift apart. `union` dedupes,
+-- so a key found in several sources still yields one row. fdos is deliberately excluded,
+-- matching the previous extra_keys behaviour.
+all_keys as (
+  select year, week, pg_key, distributor_id from stm
   union
-  select year, week, parent_id, distributor_id from salfo
+  select year, week, pg_key, distributor_id from salfo
   union
-  select year, week, parent_id, distributor_id from stm
+  select year, week, pg_key, distributor_id from stock
   union
-  select year, week, parent_id, distributor_id from stock
+  select year, week, pg_key, distributor_id from omset_ibn
+  union
+  select year, week, pg_key, distributor_id from target
 )
-select md.sls_div as channel, voswb.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName,voswb.week,
+
+select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName, k.week,
        vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
-       mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name, 
-       mp.parent_id, mparent.parent_nm as parent_name, mp.flag_season as flag_sku,
-       voswb.distributor_id, md.distributor_nm as distributor_name, voswb.target_qty, voswb.target_value,
+       d.div_id as sbu_id, mdiv.div_nm as sbu_name, d.brand_id, mbrand.brand_nm as brand_name, d.subbrand_id, msubbrand.subbrand_nm as subbrand_name,
+       d.parent_id, mparent.parent_nm as parent_name, d.flag_season as flag_sku,
+       k.distributor_id, md.distributor_nm as distributor_name, t.target_qty, t.target_value,
        round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
        stm.stm_qty, stm.stm_value,
        ws.stock_ibn, ws.stock_ibn_value, fdos.fdos_update, fdos.fdos_value, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
        stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at, cr.flag
-from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp
-left join spx.m_division mdiv on mdiv.div_id = mp.div_id
-left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
+from all_keys k
+join cycle_ranked cr on cr.year = k.year and cr.week = k.week
+join pg_dim d on d.pg_key = k.pg_key
+join spx.m_distributor md on md.distributor_id = k.distributor_id
+left join spx.m_division mdiv on mdiv.div_id = d.div_id
+left join spx.m_brand mbrand on mbrand.brand_id = d.brand_id
+-- subbrand_id is not globally unique (603 exists under brand 601 GENTLEGEN PCH and
+-- brand 602 HAND SOAP), so both keys are required here.
 left join spx.m_subbrand msubbrand
-  on  msubbrand.subbrand_id = mp.subbrand_id
-  and msubbrand.brand_id    = mp.brand_id
-left join spx.m_parent mparent on mparent.parent_id = mp.parent_id
-join spx.v_target_weekly_by_parent voswb on mp.parent_id = voswb.parent_id
-join cycle_ranked cr on voswb.year = cr.year and voswb.week = cr.week
-join spx.m_distributor md on voswb.distributor_id = md.distributor_id
-left join sales_hierarchy vsh on voswb.distributor_id = vsh.distributor_id and voswb.parent_id = vsh.parent_id
-left join stm on voswb.year = stm.year and voswb.week = stm.week and voswb.distributor_id = stm.distributor_id and voswb.parent_id = stm.parent_id
-left join salfo on voswb.year = salfo.year and voswb.week = salfo.week and voswb.distributor_id = salfo.distributor_id and voswb.parent_id = salfo.parent_id
-left join stock on voswb.year = stock.year and voswb.week = stock.week and voswb.distributor_id = stock.distributor_id and voswb.parent_id = stock.parent_id
-left join fdos on voswb.year = fdos.year and voswb.week = fdos.week and voswb.distributor_id = fdos.distributor_id and voswb.parent_id = fdos.parent_id
-left join wh_stock ws
-  on voswb.year = ws.year and voswb.week = ws.week and voswb.parent_id = ws.parent_id
+  on  msubbrand.subbrand_id = d.subbrand_id
+  and msubbrand.brand_id    = d.brand_id
+left join spx.m_parent mparent on mparent.parent_id = d.parent_id
+left join sales_hierarchy vsh on vsh.pg_key = k.pg_key and vsh.distributor_id = k.distributor_id
+left join target t
+  on t.year = k.year and t.week = k.week and t.pg_key = k.pg_key and t.distributor_id = k.distributor_id
+left join stm
+  on stm.year = k.year and stm.week = k.week and stm.pg_key = k.pg_key and stm.distributor_id = k.distributor_id
+left join salfo
+  on salfo.year = k.year and salfo.week = k.week and salfo.pg_key = k.pg_key and salfo.distributor_id = k.distributor_id
+left join stock
+  on stock.year = k.year and stock.week = k.week and stock.pg_key = k.pg_key and stock.distributor_id = k.distributor_id
+left join fdos
+  on fdos.year = k.year and fdos.week = k.week and fdos.pg_key = k.pg_key and fdos.distributor_id = k.distributor_id
 left join omset_ibn oi
-  on voswb.year = oi.year and voswb.week = oi.week
-  and voswb.parent_id = oi.parent_id and voswb.distributor_id = oi.distributor_id
-left join avgs a
-  on a.year = voswb.year and a.week = voswb.week
-  and a.distributor_id = voswb.distributor_id and a.parent_id = voswb.parent_id
-left join avgs_ibn aibn
-  on aibn.year = voswb.year and aibn.week = voswb.week
-  and voswb.parent_id = aibn.parent_id and voswb.distributor_id = aibn.distributor_id
-
-union all
-
--- Rows present in any subdist-level source (omset_ibn, salfo, stm, stock) but with no matching
--- target (voswb) row for the same year/week/parent/distributor. These are dropped by the
--- target-driven query above; bring them back here with targets left NULL and every metric
--- mirrored on the same key. extra_keys is DISTINCT, so a key found in several sources yields one row.
-select md.sls_div as channel, ek.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName, ek.week,
-       vsh.nsm_id, vsh.nsm_name, vsh.grsm_id, vsh.grsm_name, vsh.rsm_id, vsh.rsm_name, vsh.ss_id, vsh.ss_name,
-       mp.div_id as sbu_id, mdiv.div_nm as sbu_name, mp.brand_id, mbrand.brand_nm as brand_name, mp.subbrand_id, msubbrand.subbrand_nm as subbrand_name,
-       mp.parent_id, mparent.parent_nm as parent_name, mp.flag_season as flag_sku,
-       ek.distributor_id, md.distributor_nm as distributor_name, null as target_qty, null as target_value,
-       round(coalesce(salfo.salfo_qty,0),2) as salfo_qty, round(coalesce(salfo.salfo_value,0),2) as salfo_value,
-       stm.stm_qty, stm.stm_value,
-       ws.stock_ibn, ws.stock_ibn_value, fdos.fdos_update, fdos.fdos_value, oi.sta_qty as sta_qty, oi.sta_value as sta_value,
-       stock.stock_qty, stock.stock_value, a.avg_5w_qty,  a.avg_5w_value, a.avg_13w_qty, a.avg_13w_value, aibn.avg_5w_sta_qty, aibn.avg_5w_sta_value, now() as loaded_at, cr.flag
-from extra_keys ek
-join (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season from spx.m_product) mp on mp.parent_id = ek.parent_id
-join cycle_ranked cr on ek.year = cr.year and ek.week = cr.week
-join spx.m_distributor md on ek.distributor_id = md.distributor_id
-left join spx.m_division mdiv on mdiv.div_id = mp.div_id
-left join spx.m_brand mbrand on mbrand.brand_id = mp.brand_id
-left join spx.m_subbrand msubbrand
-  on  msubbrand.subbrand_id = mp.subbrand_id
-  and msubbrand.brand_id    = mp.brand_id
-left join spx.m_parent mparent on mparent.parent_id = mp.parent_id
-left join sales_hierarchy vsh on ek.distributor_id = vsh.distributor_id and ek.parent_id = vsh.parent_id
-left join omset_ibn oi on ek.year = oi.year and ek.week = oi.week and ek.distributor_id = oi.distributor_id and ek.parent_id = oi.parent_id
-left join stm on ek.year = stm.year and ek.week = stm.week and ek.distributor_id = stm.distributor_id and ek.parent_id = stm.parent_id
-left join salfo on ek.year = salfo.year and ek.week = salfo.week and ek.distributor_id = salfo.distributor_id and ek.parent_id = salfo.parent_id
-left join stock on ek.year = stock.year and ek.week = stock.week and ek.distributor_id = stock.distributor_id and ek.parent_id = stock.parent_id
-left join fdos on ek.year = fdos.year and ek.week = fdos.week and ek.distributor_id = fdos.distributor_id and ek.parent_id = fdos.parent_id
+  on oi.year = k.year and oi.week = k.week and oi.pg_key = k.pg_key and oi.distributor_id = k.distributor_id
 left join wh_stock ws
-  on ek.year = ws.year and ek.week = ws.week and ek.parent_id = ws.parent_id
+  on ws.year = k.year and ws.week = k.week and ws.parent_id = d.parent_id
 left join avgs a
-  on a.year = ek.year and a.week = ek.week
-  and a.distributor_id = ek.distributor_id and a.parent_id = ek.parent_id
+  on a.year = k.year and a.week = k.week and a.pg_key = k.pg_key and a.distributor_id = k.distributor_id
 left join avgs_ibn aibn
-  on aibn.year = ek.year and aibn.week = ek.week
-  and ek.parent_id = aibn.parent_id and ek.distributor_id = aibn.distributor_id
-where not exists (
-  select 1 from spx.v_target_weekly_by_parent v
-  where v.year = ek.year and v.week = ek.week
-    and v.parent_id = ek.parent_id and v.distributor_id = ek.distributor_id
-)
+  on aibn.year = k.year and aibn.week = k.week and aibn.pg_key = k.pg_key and aibn.distributor_id = k.distributor_id
