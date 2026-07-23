@@ -1,7 +1,9 @@
 {{ config(
     materialized='table',
+    pre_hook="set local work_mem = '256MB'",
     post_hook=[
-      "CREATE INDEX IF NOT EXISTS ix_sspc ON {{ this }} (\"year\", channel, \"period\", week, parent_id, distributor_id, sbu_id, brand_id, subbrand_id, flag_sku)"
+      "CREATE INDEX IF NOT EXISTS ix_sspc ON {{ this }} (\"year\", channel, \"period\", week, distributor_id, pg_id)",
+      "CREATE INDEX IF NOT EXISTS ix_sspc_dim ON {{ this }} (\"year\", channel, \"period\", week, parent_id, distributor_id)"
     ]
 ) }}
 
@@ -11,7 +13,7 @@ with base as (
     nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name,
     ss_id, ss_name, sbu_id, sbu_name, brand_id, brand_name,
     subbrand_id, subbrand_name, parent_id, parent_name,
-    flag_sku,
+    flag_sku, pg_id,
     distributor_id, distributor_name,
     target_qty, salfo_qty, sta_qty, stm_qty,
     target_value, salfo_value, sta_value, stm_value,
@@ -34,6 +36,21 @@ years_in_data as (
   select distinct year from base
 ),
 
+-- Narrow projections of `base` used purely as join/anti-join probes. cy_rows needs only two
+-- columns from the prior year, and the NOT EXISTS below needs only the key -- hashing all ~40
+-- columns of `base` for either builds a far larger hash table than necessary.
+-- py_stm pre-shifts the year so the join is a plain equality on both sides.
+py_stm as (
+  select year + 1 as ref_year, channel, "period", week, distributor_id, pg_id,
+         stm_qty as stm_prev, stm_value as stm_prev_value
+  from base
+),
+-- no `distinct` needed: base is unique on this key
+cy_keys as (
+  select year, channel, "period", week, distributor_id, pg_id
+  from base
+),
+
 -- Part 1: every current-year row, with stm_prev pulled from matching prev-year row
 cy_rows as (
   select
@@ -52,8 +69,8 @@ cy_rows as (
     cy.sta_value     as sta_value,
     cy.stm_qty       as stm_current,
     cy.stm_value     as stm_current_value,
-    py.stm_qty       as stm_prev,
-    py.stm_value     as stm_prev_value,
+    py.stm_prev,
+    py.stm_prev_value,
     cy.stock_subdist,
     cy.stock_subdist_value,
     cy.stock_ibn,
@@ -61,25 +78,22 @@ cy_rows as (
     cast(cy.scd_subdist_ratio as float)       as scd,
     cast(cy.scd_subdist_value_ratio as float) as scd_value,
     cy.avg_5w_qty,cy.avg_5w_sta_qty,
-    cy.avg_5w_value,cy.avg_5w_sta_value
+    cy.avg_5w_value,cy.avg_5w_sta_value,
+    cy.pg_id   -- appended last so existing column positions stay stable for Superset
   from base cy
-  left join base py
-    on  py.year          = cy.year - 1
+  -- pg_id is the parent's product-group surrogate: it determines parent_id, sbu_id, brand_id,
+  -- subbrand_id and flag_sku, all of which are part of the parent's grain. Joining on it alone
+  -- is equivalent to matching all five, but it is a single non-null integer -- so this stays a
+  -- hash join, where IS NOT DISTINCT FROM could not be used as a hash key at all.
+  -- Sales hierarchy is deliberately excluded: territory is legitimately reassigned year over
+  -- year and including it would blank stm_prev after every realignment.
+  left join py_stm py
+    on  py.ref_year      = cy.year
     and py.channel       = cy.channel
     and py."period"      = cy."period"
     and py.week          = cy.week
-    and py.parent_id     = cy.parent_id
     and py.distributor_id = cy.distributor_id
-    -- Product attributes are part of the parent's grain: one parent can span several
-    -- subbrands/brands/sbus. Without these, each cy row matches every py row for the
-    -- parent and stm_current is counted once per prior-year row (observed 4x).
-    -- IS NOT DISTINCT FROM = NULL-safe equality; these arrive via left join and can be NULL,
-    -- and plain `=` would silently drop stm_prev. Sales hierarchy is deliberately excluded --
-    -- territory is legitimately reassigned year over year and would blank stm_prev.
-    and py.sbu_id      is not distinct from cy.sbu_id
-    and py.brand_id    is not distinct from cy.brand_id
-    and py.subbrand_id is not distinct from cy.subbrand_id
-    and py.flag_sku    is not distinct from cy.flag_sku
+    and py.pg_id         = cy.pg_id
 ),
 
 -- Part 2: prev-year weeks with NO matching current-year row
@@ -110,25 +124,23 @@ py_orphan_rows as (
     null::float    as scd,
     null::float    as scd_value,
     py.avg_5w_qty,py.avg_5w_sta_qty,
-    py.avg_5w_value,py.avg_5w_sta_value
+    py.avg_5w_value,py.avg_5w_sta_value,
+    py.pg_id
   from base py
   -- only generate orphan rows when the next year actually exists in data
   inner join years_in_data yid on yid.year = py.year + 1
   -- exclude rows that already have a cy counterpart (handled in Part 1)
+  -- must mirror the cy_rows join key exactly, or Part 1 and Part 2 disagree about what
+  -- counts as "already handled" and orphan rows get both dropped and duplicated.
+  -- All-equality predicates on cy_keys let this plan as a hash anti-join.
   where not exists (
-    select 1 from base cy
+    select 1 from cy_keys cy
     where cy.year          = py.year + 1
       and cy.channel       = py.channel
       and cy."period"      = py."period"
       and cy.week          = py.week
-      and cy.parent_id     = py.parent_id
       and cy.distributor_id = py.distributor_id
-      -- must mirror the cy_rows join key exactly, or Part 1 and Part 2 disagree about
-      -- what counts as "already handled" and orphan rows get both dropped and duplicated
-      and cy.sbu_id      is not distinct from py.sbu_id
-      and cy.brand_id    is not distinct from py.brand_id
-      and cy.subbrand_id is not distinct from py.subbrand_id
-      and cy.flag_sku    is not distinct from py.flag_sku
+      and cy.pg_id         = py.pg_id
   )
 )
 
