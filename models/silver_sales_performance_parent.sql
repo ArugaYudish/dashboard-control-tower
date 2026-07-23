@@ -1,4 +1,12 @@
-{{ config(materialized='table') }}
+{{ config(
+    materialized='table',
+    indexes=[
+      {'columns': ['year', 'channel', 'period', 'week', 'parent_id', 'distributor_id']},
+      {'columns': ['year','week','channel','sbu_name','grsm_name','rsm_name']}
+      {'columns': ['year','period','channel','sbu_name']}      
+      {'columns': ['year','week','distributor_id','parent_id']}
+    ]
+) }}
 
 -- Grain: one row per (year, channel, period, week, product-group, distributor_id)
 -- where product-group = (div_id, brand_id, subbrand_id, parent_id, flag_season).
