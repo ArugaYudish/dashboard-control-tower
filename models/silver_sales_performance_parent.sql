@@ -28,8 +28,7 @@ with cycle_ranked as (
   		 when year = EXTRACT(YEAR FROM CURRENT_DATE) -1 then 'ly'
   	end as flag
   from spx.m_cycle3
-  where year between extract(year from current_date) - 1
-                 and extract(year from current_date)
+  where year = extract(year from current_date)
   group by year, week, period
 ),
 -- For every target week, list the source weeks feeding its rolling averages:
