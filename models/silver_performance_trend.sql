@@ -102,7 +102,7 @@ fdos as (
 sales as
 (
   select year, period, parent_id, sum(coalesce(salfo_qty,0)) as salfo_qty, sum(coalesce(stm_qty,0)) as stm_qty  
-   from spx.silver_sales_performance ssp 
+   from spx.silver_sales_performance_parent ssp 
   group by year, period, parent_id
 )
 select   ph.div_id as sbu_id, ph.div_nm as sbu_name,
