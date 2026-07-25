@@ -112,7 +112,7 @@ salfo as (
 	from
 	(
 	select vscw.year, vscw.week, vscw.pcode, pg.pg_id, vscw.distributor_id, coalesce(vscw.qty,0) as qty, coalesce(vscw.qty,0)*coalesce(mp.price,0) as salfo_value
-	 from spx.v_salfo_confirm_weekly vscw inner join cycle_ranked cr on vscw.year = cr.year and vscw.week = cr.week join pcode_pg pg on vscw.pcode = pg.pcode
+	 from spx.t_salfo_confirm_weekly vscw inner join cycle_ranked cr on vscw.year = cr.year and vscw.week = cr.week join pcode_pg pg on vscw.pcode = pg.pcode
 		left join spx.m_distributor md on vscw.distributor_id = md.distributor_id
 		left join spx.m_price_divisi mp on vscw.year = mp.year and md.sls_div = mp.sls_div and vscw.pcode = mp.pcode
 	) a
