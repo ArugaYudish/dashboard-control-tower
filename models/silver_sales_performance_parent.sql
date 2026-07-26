@@ -174,7 +174,7 @@ wh_stock as (
 ),
 omset_ibn as (
   select a.year, a.week, pg.pg_id, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
-  from spx.m_sta_subdist a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week
+  from spx.v_sta_subdist a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week
   	join pcode_pg pg on a.pcode = pg.pcode
   group by a.year, a.week, pg.pg_id, distributor_id
 ),
@@ -233,7 +233,7 @@ select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period 
        -- appended last so every existing column position stays stable for Superset.
        -- silver_sales_performance_chart joins prior year on this instead of the five
        -- product-attribute columns: one integer equality, hash-joinable and NULL-free.
-       k.pg_id
+       k.pg_id, case when md.flagdirect = '0' then 'DIRECT' else 'NON DIRECT' end as flag_direct
 from all_keys k
 join cycle_ranked cr on cr.year = k.year and cr.week = k.week
 join pg_dim d on d.pg_id = k.pg_id
