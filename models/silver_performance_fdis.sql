@@ -1,0 +1,80 @@
+{{ config(materialized='table') }}
+
+with cycle_week as materialized (
+  select distinct
+    year,
+    period,
+    to_char(to_date(cast(period as text), 'MM'), 'Mon') as periodName,
+    week,
+    case
+      when year = extract(year from current_date)     then 'cy'
+      when year = extract(year from current_date) - 1 then 'ly'
+    end as flag,'param' as param
+  from spx.m_cycle3
+  where (year * 12 + period)
+    between (extract(year from current_date) * 12 + extract(month from current_date)) - 6
+        and (extract(year from current_date) * 12 + extract(month from current_date))
+),
+product_hierarchy as (
+  select distinct
+    mp.div_id,      mdiv.div_nm,
+    mp.brand_id,    mbrand.brand_nm,
+    mp.subbrand_id, msubbrand.subbrand_nm,
+    mp.parent_id,   mparent.parent_nm, 'param' as param
+  from spx.m_product mp 
+  left join spx.m_division  mdiv      on mdiv.div_id           = mp.div_id
+  left join spx.m_brand     mbrand    on mbrand.brand_id       = mp.brand_id
+  left join spx.m_subbrand  msubbrand on msubbrand.subbrand_id = mp.subbrand_id  and msubbrand.brand_id    = mp.brand_id
+  left join spx.m_parent    mparent   on mparent.parent_id     = mp.parent_id
+  where mp.ct_id ='120001' and mp.div_id <> 'XX'
+),
+fdis as (
+  select
+    cw.period,
+    cw.periodName,
+    vfu.week, 
+    vfu.year,
+    p.parent_id,
+    sum(coalesce(vfu.fdis_update,0)) as fdis_update, sum(coalesce(vfa.fdis_actual,0)) as fdis_actual
+  from spx.v_fdis_update vfu
+  join cycle_week cw
+    on cw.year = vfu.year
+   and cw.week = vfu.week
+  left join spx.v_fdis_actual vfa
+    on  vfa.week   = vfu.week
+    and vfa.period = cw.period
+    and vfa.year   = vfu.year
+    and vfa.wh_id  = vfu.wh_id
+    and vfa.pcode  = vfu.pcode
+  left join spx.m_product p
+    on p.pcode = vfu.pcode
+  group by cw.period, cw.periodName, vfu.year, vfu.week, p.parent_id
+),
+fdis_actual as (
+  select
+    cw.period,
+    cw.periodName,
+    vfu.week,
+    vfu.year,
+    p.parent_id,
+    sum(coalesce(vfu.fdis_actual,0)) as fdis_actual
+  from spx.v_fdis_actual vfu
+  join cycle_week cw
+    on cw.year = vfu.year
+   and cw.week = vfu.week  
+  left join spx.m_product p
+    on p.pcode = vfu.pcode
+  group by cw.period, cw.periodName, vfu.year, vfu.week, p.parent_id
+)
+select   ph.div_id as sbu_id, ph.div_nm as sbu_name,
+  ph.brand_id, ph.brand_nm as brand_name,
+  ph.subbrand_id, ph.subbrand_nm as subbrand_name,
+  ph.parent_id, ph.parent_nm as parent_name,
+  cw.period, cw.periodName, cw.year, cw.week, 
+    coalesce(fdis.fdis_update,0) as fdis_update, coalesce(fdis_actual.fdis_actual,0) as fdis_actual
+ from product_hierarchy ph join (select distinct year, period, week, periodName, param from cycle_week) cw on ph.param = cw.param
+left join fdis
+  on fdis.parent_id = ph.parent_id and fdis.period = cw.period
+  and fdis.year = cw.year  and fdis.week = cw.week
+left join fdis_actual  on fdis_actual.parent_id = ph.parent_id  
+	and fdis_actual.period = cw.period and fdis_actual.year = cw.year and fdis_actual.week = cw.week
