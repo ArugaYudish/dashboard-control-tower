@@ -1,6 +1,34 @@
 {{ config(
     materialized='table',
-    pre_hook="set local work_mem = '256MB'",
+    pre_hook=[
+      "set local work_mem = '256MB'",
+      "drop table if exists tmp_pg_dim",
+      "create temp table tmp_pg_dim as
+         select row_number() over (
+                  order by parent_id, div_id nulls last, brand_id nulls last,
+                           subbrand_id nulls last, flag_season nulls last
+                )::int as pg_id,
+                div_id, brand_id, subbrand_id, parent_id, flag_season
+         from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season
+               from spx.m_product where parent_id is not null) g",
+      "create unique index on tmp_pg_dim (pg_id)",
+      "create index on tmp_pg_dim (parent_id)",
+      "analyze tmp_pg_dim",
+      "drop table if exists tmp_pcode_pg",
+      "create temp table tmp_pcode_pg as
+         select p.pcode, d.pg_id
+         from (select distinct pcode, div_id, brand_id, subbrand_id, parent_id, flag_season
+               from spx.m_product where parent_id is not null) p
+         join tmp_pg_dim d
+           on  d.parent_id   = p.parent_id
+           and d.div_id      is not distinct from p.div_id
+           and d.brand_id    is not distinct from p.brand_id
+           and d.subbrand_id is not distinct from p.subbrand_id
+           and d.flag_season is not distinct from p.flag_season",
+      "create index on tmp_pcode_pg (pcode)",
+      "create index on tmp_pcode_pg (pg_id)",
+      "analyze tmp_pcode_pg"
+    ],
     indexes=[
       {'columns': ['year', 'channel', 'period', 'week', 'parent_id', 'distributor_id']},
       {'columns': ['year','week','channel','sbu_name','grsm_name','rsm_name']},
@@ -49,33 +77,23 @@ window_counts as (
   group by year, week
 ),
 
--- Product-group dimension with a dense integer surrogate. pg_id (4 bytes) is what every
--- downstream CTE groups and joins on, instead of the 5 attribute columns:
---   * div_id/brand_id/subbrand_id/flag_season are nullable, so plain `=` would silently
---     drop those rows, and IS NOT DISTINCT FROM cannot be used as a hash key at all;
---   * a text/md5 surrogate is NULL-safe but widens every hash and sort key across 6
---     aggregations, a UNION dedup and 9 joins over millions of rows -- enough to spill
---     work_mem to disk everywhere.
--- The NULL-safe comparison is therefore paid exactly once, against ~2k product groups.
-pg_dim as (
-  select row_number() over (
-           order by parent_id, div_id nulls last, brand_id nulls last,
-                    subbrand_id nulls last, flag_season nulls last
-         )::int as pg_id,
-         div_id, brand_id, subbrand_id, parent_id, flag_season
-  from (select distinct div_id, brand_id, subbrand_id, parent_id, flag_season
-        from spx.m_product where parent_id is not null) g
+-- pg_dim (dense integer surrogate pg_id per product group) and pcode_pg (pcode -> pg_id)
+-- are built in the pre_hook as ANALYZEd temp tables (tmp_pg_dim / tmp_pcode_pg), not inline
+-- CTEs. As multiply-referenced CTEs the planner had no statistics for them and estimated
+-- rows=1, forcing nested loops across the weekly sources. Reading the analyzed temp tables
+-- gives real row counts and column stats.
+--   * `not materialized` inlines these wrappers at each reference, so every downstream join
+--     sees the temp table's own statistics (n_distinct on pcode, etc.) instead of an opaque
+--     CTE result -- which is the whole point of moving them out.
+--   * pg_id keeps the same parent-first row_number ordering, so pg_primary's min(pg_id) pick
+--     and the values embedded in this model's output are unchanged.
+pg_dim as not materialized (
+  select pg_id, div_id, brand_id, subbrand_id, parent_id, flag_season
+  from tmp_pg_dim
 ),
-pcode_pg as (
-  select p.pcode, d.pg_id
-  from (select distinct pcode, div_id, brand_id, subbrand_id, parent_id, flag_season
-        from spx.m_product where parent_id is not null) p
-  join pg_dim d
-    on  d.parent_id   = p.parent_id
-    and d.div_id      is not distinct from p.div_id
-    and d.brand_id    is not distinct from p.brand_id
-    and d.subbrand_id is not distinct from p.subbrand_id
-    and d.flag_season is not distinct from p.flag_season
+pcode_pg as not materialized (
+  select pcode, pg_id
+  from tmp_pcode_pg
 ),
 -- One designated product group per parent. Targets are only available at parent grain
 -- (v_target_weekly_by_parent has no pcode), so they attach here and are NULL elsewhere --
@@ -203,6 +221,7 @@ select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_upda
 target as (
   select v.year, v.week, v.distributor_id, p.pg_id, v.target_qty, v.target_value
   from spx.v_target_weekly_by_parent v
+   inner join cycle_ranked cr on v.year = cr.year and v.week = cr.week
   join pg_primary p on p.parent_id = v.parent_id
 ),
 -- Every key present in any source. Replaces the old target-driven select + `extra_keys`
