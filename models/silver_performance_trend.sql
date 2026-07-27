@@ -74,7 +74,7 @@ fdos as (
     select
       cw.period, mss.year, mp.parent_id, mss.week, mss.distributor_id,
       sum(mss.sta_qty) as sta_qty
-    from spx.m_sta_subdist mss
+    from spx.v_sta_subdist mss
     join cycle_week cw
       on cw.year = mss.year and cw.week = mss.week
     left join spx.m_product mp
