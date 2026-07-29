@@ -20,7 +20,7 @@ WITH latest_fcustsls AS (
             PARTITION BY distributor_id, cust_id 
             ORDER BY tahun DESC, periode DESC
         ) AS rn
-    FROM {{ source('raw_ficom_m3', 'v_fcustsls_staging') }}
+    FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
 -- 1. CTE FACING IR (AI + MANUAL BANDING)
