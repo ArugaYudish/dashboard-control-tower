@@ -32,8 +32,8 @@ cte_facing AS (
         COALESCE(m.visit_date, a.visit_date) AS visit_date,
         SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
         COUNT(DISTINCT COALESCE(m.pcode::varchar, a.pcode::varchar)) AS total_pcode_detected
-    FROM {{ source('raw_ficom_m3', 't_rcall_avis_d') }} a
-    FULL OUTER JOIN {{ source('raw_ficom_m3', 't_rcall_avis_manual') }} m 
+    FROM raw_ficom_m3.t_rcall_avis_d a
+    FULL OUTER JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
        AND a.outlet_id::varchar = m.outlet_id::varchar
        AND a.pcode::varchar = m.pcode::varchar
@@ -57,7 +57,7 @@ cte_sales AS (
         s.inv_date,
         SUM(COALESCE(s.inv_qty::numeric, 0)) AS total_inv_qty,
         SUM(COALESCE(s.inv_val::numeric, 0)) AS total_inv_val
-    FROM {{ source('raw_ho', 'vfsales_det') }} s
+    FROM raw_ho.vfsales_det s
     WHERE (COALESCE(s.inv_qty::numeric, 0) > 0 OR COALESCE(s.inv_val::numeric, 0) > 0)
     {% if is_incremental() %}
       AND s.inv_date >= (SELECT MAX(visit_date) - INTERVAL '7 days' FROM {{ this }})
@@ -123,16 +123,16 @@ SELECT
         ELSE '4. No IR & No Sales'
     END AS anomaly_status
 
-FROM {{ source('raw_ficom_m3', 'v_salesman_hierarchy') }} b 
+FROM raw_ficom_m3.v_salesman_hierarchy b 
 
-LEFT JOIN {{ source('raw_ficom_m3', 't_grading_ir') }} a  
+LEFT JOIN raw_ficom_m3.t_grading_ir a  
     ON a.sls_id::varchar = b.sls_id::varchar  
    AND a.distributor_id::varchar = b.distributor_id::varchar
    {% if is_incremental() %}
      AND a.visit_date >= (SELECT MAX(visit_date) - INTERVAL '7 days' FROM {{ this }})
    {% endif %}
 
-LEFT JOIN {{ source('raw_ficom_m3', 't_grading_banding') }} tgb 
+LEFT JOIN raw_ficom_m3.t_grading_banding tgb 
     ON a.distributor_id::varchar = tgb.distributor_id::varchar 
    AND a.sls_id::varchar = tgb.sls_id::varchar 
    AND a.team_id::varchar = tgb.team_id::varchar 
@@ -141,14 +141,14 @@ LEFT JOIN {{ source('raw_ficom_m3', 't_grading_banding') }} tgb
    AND a.visit_date = tgb.visit_date 
    AND a.kode_ap::varchar = tgb.kode_ap::varchar
 
-LEFT JOIN {{ source('raw_ficom_m3', 'm_distributor') }} md 
+LEFT JOIN raw_ficom_m3.m_distributor md 
     ON COALESCE(tgb.distributor_id::varchar, a.distributor_id::varchar) = md.distributor_id::varchar
 
-LEFT JOIN {{ source('raw_ficom_m3', 'm_customer') }} mc 
+LEFT JOIN raw_ficom_m3.m_customer mc 
     ON COALESCE(tgb.distributor_id::varchar, a.distributor_id::varchar) = mc.distributor_id::varchar 
    AND COALESCE(tgb.outlet_id::varchar, a.outlet_id::varchar) = mc.cust_id::varchar 
 
-LEFT JOIN {{ source('raw_ficom_m3', 'm_salesforce') }} ms 
+LEFT JOIN raw_ficom_m3.m_salesforce ms 
     ON COALESCE(tgb.salesforce_id::varchar, a.salesforce_id::varchar) = ms.salesforce_id::varchar 
 
 LEFT JOIN latest_fcustsls vfs 
@@ -156,13 +156,13 @@ LEFT JOIN latest_fcustsls vfs
    AND COALESCE(tgb.outlet_id::varchar, a.outlet_id::varchar) = vfs.cust_id::varchar 
    AND vfs.rn = 1
 
-LEFT JOIN {{ source('raw_ficom_m3', 'm_group_channels') }} mcs 
+LEFT JOIN raw_ficom_m3.m_group_channels mcs 
     ON vfs.channel_id::varchar = mcs.channel_id::varchar 
 
-LEFT JOIN {{ source('raw_ficom_m3', 'm_mapping_group_salesforce') }} mgc 
+LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
     ON a.salesforce_id::varchar = mgc.salesforce_id::varchar
 
-LEFT JOIN {{ source('spx', 'm_cycle3') }} mc3 
+LEFT JOIN spx.m_cycle3 mc3 
     ON COALESCE(tgb.visit_date, a.visit_date) = mc3.cdate
 
 -- JOIN METRIC FACING & TRANSAKSI
