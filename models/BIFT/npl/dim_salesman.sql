@@ -20,7 +20,7 @@ WITH combined_salesman AS (
         opr_type,
         salesforce_id,
         upd_date,
-        trans_date,
+        trans_date, 
         _airbyte_extracted_at
     FROM raw_ficom_m1.m_salesman
 
@@ -58,17 +58,32 @@ WITH combined_salesman AS (
 -- Deduplicate salesforce mapping by salesforce_id
 combined_salesforce_mapping AS (
     SELECT DISTINCT ON (salesforce_id)
-        div_id,
-        div_nm,
-        priority,
-        salesforce_id,
-        salesforce_nm,
-        gsalesforce_id,
-        gsalesforce_nm
-    FROM raw_ficom_m2.m_mapping_group_salesforce
-    WHERE salesforce_id IS NOT NULL
-    ORDER BY salesforce_id, _airbyte_extracted_at DESC NULLS LAST
-),
+	* FROM (SELECT DISTINCT ON (salesforce_id)
+	    div_id,
+	    div_nm,
+	    salesforce_id,
+	    salesforce_nm,
+	    gsalesforce_id,
+	    gsalesforce_nm
+	FROM raw_ficom_m1.m_mapping_group_salesforce
+	UNION ALL
+	SELECT DISTINCT ON (salesforce_id)
+	    div_id,
+	    div_nm,
+	    salesforce_id,
+	    salesforce_nm,
+	    gsalesforce_id,
+	    gsalesforce_nm
+	FROM raw_ficom_m2.m_mapping_group_salesforce
+	UNION ALL
+	SELECT DISTINCT ON (salesforce_id)
+	    div_id,
+	    div_nm,
+	    salesforce_id,
+	    salesforce_nm,
+	    gsalesforce_id,
+	    gsalesforce_nm
+	FROM raw_ficom_m3.m_mapping_group_salesforce) AS salesforce),
 
 dedup_salesman AS (
     SELECT DISTINCT ON (distributor_id, sls_id)
@@ -102,7 +117,6 @@ SELECT
     -- Mapped Salesforce Group Columns
     sf.div_id               AS salesforce_div_id,
     sf.div_nm               AS salesforce_div_nm,
-    sf.priority             AS salesforce_priority,
     sf.salesforce_nm,
     sf.gsalesforce_id,
     sf.gsalesforce_nm,

@@ -67,33 +67,7 @@ WITH combined_hierarchy AS (
         sls_id,
         _airbyte_extracted_at
     FROM raw_ficom_m3.v_salesman_hierarchy
-),
-
--- Deduplicate hierarchy mapping per salesman/distributor
-dedup_hierarchy AS (
-    SELECT DISTINCT ON (distributor_id, sls_id)
-        source_schema,
-        sd_id,
-        sd_nm,
-        nsm_id,
-        nsm_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        distributor_id,
-        sls_id
-    FROM combined_hierarchy
-    WHERE distributor_id IS NOT NULL 
-      AND sls_id IS NOT NULL
-    ORDER BY 
-        distributor_id, 
-        sls_id, 
-        _airbyte_extracted_at DESC NULLS LAST
 )
-
 SELECT 
     h.source_schema,
     
@@ -119,6 +93,7 @@ SELECT
     
     -- 6. Distributor Details
     h.distributor_id,
+    md.distributor_nm,
     
     -- 7. Salesman Details (Enriched from dim_salesman)
     h.sls_id,
@@ -128,12 +103,13 @@ SELECT
     sm.salesforce_id,
     sm.salesforce_div_id,
     sm.salesforce_div_nm,
-    sm.salesforce_priority,
     sm.salesforce_nm,
     sm.gsalesforce_id,
     sm.gsalesforce_nm
 
-FROM dedup_hierarchy h
+FROM combined_hierarchy h
 LEFT JOIN bift.dim_salesman sm
        ON h.distributor_id = sm.distributor_id
       AND h.sls_id        = sm.sls_id
+LEFT JOIN spx.m_distributor md
+        ON md.distributor_id = h.distributor_id
