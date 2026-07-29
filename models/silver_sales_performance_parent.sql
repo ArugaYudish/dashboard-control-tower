@@ -239,6 +239,8 @@ all_keys as (
   select year, week, pg_id, distributor_id from omset_ibn
   union
   select year, week, pg_id, distributor_id from target
+  union
+  select year, week, pg_id, distributor_id from fdos
 )
 
 select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period as text), 'MM'), 'Mon') as periodName, k.week,
