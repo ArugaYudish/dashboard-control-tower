@@ -24,9 +24,15 @@ SELECT
     dfs.tahun,
     dfs.periode,
     dfs.channel_id,
+    gc.channel_nm,
+    gc.group_channel_id,
+    gc.group_channel_nm,
     dfs.flag_aktif,
     dfs.group_outlet,
     dfs.salesforce_id,
+    mmgs.gsalesforce_id,
+    mmgs.gsalesforce_nm,
+    mmgs.salesforce_nm,
     dfs.team_id,
     dfs.hrabu,
     dfs.nobrs,
@@ -57,6 +63,10 @@ SELECT
     dc.latitude,
     dc.longitude
 FROM {{ ref('stg_fcustsls') }} dfs
+INNER JOIN bift.dim_group_channel gc
+    ON dfs.channel_id = gc.channel_id
+LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
+    ON dfs.salesforce_id = mmgs.salesforce_id
 LEFT JOIN bift.dim_customer dc 
     ON dc.distributor_id = dfs.distributor_id 
    AND dc.cust_id = dfs.cust_id 
