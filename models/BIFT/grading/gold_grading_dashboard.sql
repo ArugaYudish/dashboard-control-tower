@@ -21,19 +21,19 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL
+-- 1. CTE GRADING STORE LEVEL (Agregasi Max Grade per Cycle Week)
 cte_grading_store AS (
     SELECT 
         COALESCE(b.distributor_id::varchar, g.distributor_id::varchar) AS distributor_id,
         COALESCE(b.outlet_id::varchar, g.outlet_id::varchar) AS outlet_id,
         COALESCE(b.sls_id::varchar, g.sls_id::varchar) AS sls_id,
         COALESCE(b.kode_ap::varchar, g.kode_ap::varchar) AS kode_ap,
-        COALESCE(b.visit_date, g.visit_date) AS visit_date,
-        COALESCE(b.team_id::varchar, g.team_id::varchar) AS team_id,
-        COALESCE(b.grade, g.grade) AS final_grade,
         c.year,
         c.period,
-        c.week
+        c.week,
+        MAX(COALESCE(b.visit_date, g.visit_date)) AS max_visit_date,
+        MAX(COALESCE(b.team_id::varchar, g.team_id::varchar)) AS team_id,
+        MAX(COALESCE(b.grade, g.grade)) AS final_grade
     FROM raw_ficom_m3.t_grading_ir g
     LEFT JOIN raw_ficom_m3.t_grading_banding b
         ON g.distributor_id::varchar = b.distributor_id::varchar
@@ -42,10 +42,16 @@ cte_grading_store AS (
        AND g.visit_date = b.visit_date
        AND g.kode_ap::varchar = b.kode_ap::varchar
     LEFT JOIN spx.m_cycle3 c ON COALESCE(b.visit_date, g.visit_date)::date = c.cdate::date
-    WHERE COALESCE(b.visit_date, g.visit_date) >= '2025-01-01' -- Filter biar disk gak jebol
+    WHERE COALESCE(b.visit_date, g.visit_date) >= '2025-01-01'
+    GROUP BY 
+        COALESCE(b.distributor_id::varchar, g.distributor_id::varchar),
+        COALESCE(b.outlet_id::varchar, g.outlet_id::varchar),
+        COALESCE(b.sls_id::varchar, g.sls_id::varchar),
+        COALESCE(b.kode_ap::varchar, g.kode_ap::varchar),
+        c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY (Agregasi Dulu per Key)
+-- 2. CTE IR DISPLAY (Di-Agregasi per Cycle Week agar Granularitas SAMA DENGAN SALES)
 cte_avis_item AS (
     SELECT 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
@@ -53,7 +59,10 @@ cte_avis_item AS (
         COALESCE(m.sls_id::varchar, a.sls_id::varchar) AS sls_id,
         COALESCE(m.kode_ap::varchar, a.kode_ap::varchar) AS kode_ap,
         COALESCE(m.pcode::varchar, a.pcode::varchar) AS pcode,
-        COALESCE(m.visit_date, a.visit_date) AS visit_date,
+        c.year,
+        c.period,
+        c.week,
+        MAX(COALESCE(m.visit_date, a.visit_date)) AS max_visit_date,
         SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_in_ir_table
     FROM raw_ficom_m3.t_rcall_avis_d a
@@ -64,6 +73,7 @@ cte_avis_item AS (
        AND a.kode_ap::varchar = m.kode_ap::varchar
        AND a.pcode::varchar = m.pcode::varchar
        AND a.visit_date = m.visit_date
+    LEFT JOIN spx.m_cycle3 c ON COALESCE(m.visit_date, a.visit_date)::date = c.cdate::date
     WHERE COALESCE(m.visit_date, a.visit_date) >= '2025-01-01'
     GROUP BY 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar),
@@ -71,10 +81,10 @@ cte_avis_item AS (
         COALESCE(m.sls_id::varchar, a.sls_id::varchar),
         COALESCE(m.kode_ap::varchar, a.kode_ap::varchar),
         COALESCE(m.pcode::varchar, a.pcode::varchar),
-        COALESCE(m.visit_date, a.visit_date)
+        c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA
+-- 3. CTE TRANSAKSI SALES SFA (Level Cycle Week)
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -101,7 +111,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY (FAST DIRECT VARCHAR MATCHING)
+-- 4. KONSOLIDASI ITEM ACTIVITY (1 to 1 JOIN PER CYCLE WEEK & PCODE)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -110,10 +120,10 @@ item_activity AS (
         s.salesforce_id AS salesforce_id_sales,
         COALESCE(av.pcode, s.pcode) AS pcode,
         COALESCE(av.kode_ap, 'N/A') AS kode_ap,
-        COALESCE(c_av.year, s.year) AS year,
-        COALESCE(c_av.period, s.period) AS period,
-        COALESCE(c_av.week, s.week) AS week,
-        COALESCE(av.visit_date, s.max_inv_date) AS activity_date,
+        COALESCE(av.year, s.year) AS year,
+        COALESCE(av.period, s.period) AS period,
+        COALESCE(av.week, s.week) AS week,
+        COALESCE(av.max_visit_date, s.max_inv_date) AS activity_date,
         
         COALESCE(av.total_facing, 0) AS total_facing,
         COALESCE(av.is_in_ir_table, 0) AS is_in_ir_table,
@@ -125,7 +135,8 @@ item_activity AS (
        AND av.outlet_id = s.outlet_id
        AND av.pcode = s.pcode
        AND av.sls_id = s.sls_id
-    LEFT JOIN spx.m_cycle3 c_av ON av.visit_date::date = c_av.cdate::date
+       AND av.year = s.year
+       AND av.week = s.week  -- Lock Kunci Tambahan per Week biar Gak Duplikasi
 )
 
 -- MAIN QUERY
@@ -200,21 +211,23 @@ SELECT
 
 FROM item_activity act
 
--- Header Grade Toko
+-- Header Grade Toko (Joined by Year + Week)
 LEFT JOIN cte_grading_store gst
     ON act.distributor_id = gst.distributor_id
    AND act.outlet_id = gst.outlet_id
    AND act.sls_id = gst.sls_id
    AND act.kode_ap = gst.kode_ap
-   AND act.activity_date = gst.visit_date
+   AND act.year = gst.year
+   AND act.week = gst.week
 
 LEFT JOIN cte_grading_store gst_fallback
     ON act.distributor_id = gst_fallback.distributor_id
    AND act.outlet_id = gst_fallback.outlet_id
    AND act.sls_id = gst_fallback.sls_id
-   AND act.activity_date = gst_fallback.visit_date
+   AND act.year = gst_fallback.year
+   AND act.week = gst_fallback.week
 
--- Join Hierarki
+-- Join Master Tables
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
     ON act.sls_id = b.sls_id::varchar  
    AND act.distributor_id = b.distributor_id::varchar
