@@ -25,20 +25,38 @@ WITH combined_staging AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
-latest_staging_per_period AS (
-    SELECT DISTINCT ON (distributor_id, sls_id, cust_id, tahun, periode)
-        *
+staging_with_max_date AS (
+    SELECT
+        *,
+        MAX(upd_date) OVER (
+            PARTITION BY source_schema, distributor_id, tahun, periode
+        ) AS upd_date_terakhir
     FROM combined_staging
-    WHERE cust_id IS NOT NULL 
+    WHERE flag_aktif = 'Y'
+      AND salesforce_id NOT IN ('999', '116', '213', '222')
+      AND cust_id IS NOT NULL 
       AND distributor_id IS NOT NULL
       AND tahun IS NOT NULL
       AND periode IS NOT NULL
+),
+
+latest_date_per_distributor AS (
+    SELECT *
+    FROM staging_with_max_date
+    WHERE upd_date = upd_date_terakhir
+),
+
+latest_staging_per_period AS (
+    SELECT DISTINCT ON (source_schema, distributor_id, cust_id, sls_id, tahun, periode)
+        *
+    FROM latest_date_per_distributor
     ORDER BY 
+        source_schema,
         distributor_id,
-        sls_id,
         cust_id,
-        tahun,
-        periode,
+        sls_id,
+        tahun DESC,
+        periode DESC,
         upd_date DESC NULLS LAST,
         _airbyte_extracted_at DESC NULLS LAST
 )
