@@ -21,7 +21,7 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL (Hasil Kalkulasi Nilai Atas PCode IR)
+-- 1. CTE GRADING STORE LEVEL (Payung Nilai Grade Toko)
 cte_grading_store AS (
     SELECT 
         COALESCE(b.distributor_id::varchar, g.distributor_id::varchar) AS distributor_id,
@@ -29,7 +29,6 @@ cte_grading_store AS (
         COALESCE(b.sls_id::varchar, g.sls_id::varchar) AS sls_id,
         COALESCE(b.kode_ap::varchar, g.kode_ap::varchar) AS kode_ap,
         COALESCE(b.visit_date, g.visit_date) AS visit_date,
-        COALESCE(b.salesforce_id::varchar, g.salesforce_id::varchar) AS salesforce_id,
         COALESCE(b.team_id::varchar, g.team_id::varchar) AS team_id,
         COALESCE(b.grade, g.grade) AS final_grade,
         c.year,
@@ -45,7 +44,7 @@ cte_grading_store AS (
     LEFT JOIN spx.m_cycle3 c ON COALESCE(b.visit_date, g.visit_date)::date = c.cdate::date
 ),
 
--- 2. CTE TABEL IR MURNI (Eksistensi Foto Display per PCode)
+-- 2. CTE IR DISPLAY (Eksistensi Foto Display per PCode)
 cte_avis_item AS (
     SELECT 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
@@ -55,7 +54,7 @@ cte_avis_item AS (
         COALESCE(m.pcode::varchar, a.pcode::varchar) AS pcode,
         COALESCE(m.visit_date, a.visit_date) AS visit_date,
         SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
-        1 AS is_in_ir_table -- FLAG KHUSUS: MENANDAKAN MEMANG ADA DI TABEL IR
+        1 AS is_in_ir_table
     FROM raw_ficom_m3.t_rcall_avis_d a
     FULL OUTER JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
@@ -73,7 +72,7 @@ cte_avis_item AS (
         COALESCE(m.visit_date, a.visit_date)
 ),
 
--- 3. CTE TRANSAKSI SALES SFA
+-- 3. CTE TRANSAKSI SALES SFA (vfsales_det)
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -99,7 +98,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY
+-- 4. KONSOLIDASI ITEM ACTIVITY (IR PCode vs Sales PCode)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -114,7 +113,7 @@ item_activity AS (
         COALESCE(av.visit_date, s.max_inv_date) AS activity_date,
         
         COALESCE(av.total_facing, 0) AS total_facing,
-        COALESCE(av.is_in_ir_table, 0) AS is_in_ir_table, -- BUKTI EKSISTENSI DI TABEL IR
+        COALESCE(av.is_in_ir_table, 0) AS is_in_ir_table,
         COALESCE(s.total_inv_qty, 0) AS total_inv_qty,
         COALESCE(s.total_inv_val, 0) AS total_inv_val
     FROM cte_avis_item av
@@ -122,7 +121,7 @@ item_activity AS (
         ON av.distributor_id::integer = s.distributor_id::integer
        AND av.outlet_id::integer = s.outlet_id::integer
        AND av.pcode::varchar = s.pcode::varchar
-       AND av.sls_id::varchar = s.sls_id::varchar
+       AND av.sls_id::integer = s.sls_id::integer  -- Safe Integer Matching
     LEFT JOIN spx.m_cycle3 c_av ON av.visit_date::date = c_av.cdate::date
 )
 
@@ -132,7 +131,7 @@ SELECT
     act.period,
     act.week,
     
-    -- Hierarki Sales
+    -- Hierarki Sales (Robust Join via Integer Casting)
     b.sd_id,
     b.sd_nm,
     b.nsm_id,
@@ -153,7 +152,7 @@ SELECT
     
     -- Product & Salesforce
     act.pcode,
-    COALESCE(gst.salesforce_id, act.salesforce_id_sales) AS salesforce_id,
+    act.salesforce_id_sales AS salesforce_id,
     ms.salesforce_nm,
     mgc.gsalesforce_id,
     mgc.gsalesforce_nm,
@@ -162,9 +161,9 @@ SELECT
     mgc.div_id,
     mgc.div_nm,
     
-    -- 🎯 ATURAN MUTLAK: GRADING HANYA DIAMBIL JIKA ADA DATA DI TABEL IR (is_in_ir_table = 1)
+    -- GRADE: Jika di IR terdaftar tapi data Grading bolong di DB, beri penanda Jelas
     CASE 
-        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fallback.final_grade)
+        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fallback.final_grade, 'UNGRADED / NO GRADE RECORD')
         ELSE NULL 
     END AS grade,
     
@@ -202,37 +201,38 @@ FROM item_activity act
 LEFT JOIN cte_grading_store gst
     ON act.distributor_id::integer = gst.distributor_id::integer
    AND act.outlet_id::integer = gst.outlet_id::integer
-   AND act.sls_id::varchar = gst.sls_id::varchar
+   AND act.sls_id::integer = gst.sls_id::integer
    AND act.kode_ap = gst.kode_ap
    AND act.activity_date = gst.visit_date
 
 LEFT JOIN cte_grading_store gst_fallback
     ON act.distributor_id::integer = gst_fallback.distributor_id::integer
    AND act.outlet_id::integer = gst_fallback.outlet_id::integer
-   AND act.sls_id::varchar = gst_fallback.sls_id::varchar
+   AND act.sls_id::integer = gst_fallback.sls_id::integer
    AND act.activity_date = gst_fallback.visit_date
 
+-- Join Hierarki Salesman via Integer Casting
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
-    ON act.sls_id::varchar = b.sls_id::varchar  
-   AND act.distributor_id::varchar = b.distributor_id::varchar
+    ON act.sls_id::integer = b.sls_id::integer  
+   AND act.distributor_id::integer = b.distributor_id::integer
 
 LEFT JOIN raw_ficom_m3.m_distributor md 
-    ON act.distributor_id::varchar = md.distributor_id::varchar
+    ON act.distributor_id::integer = md.distributor_id::integer
 
 LEFT JOIN raw_ficom_m3.m_customer mc 
-    ON act.distributor_id::varchar = mc.distributor_id::varchar 
-   AND act.outlet_id::varchar = mc.cust_id::varchar 
+    ON act.distributor_id::integer = mc.distributor_id::integer 
+   AND act.outlet_id::integer = mc.cust_id::integer 
 
 LEFT JOIN raw_ficom_m3.m_salesforce ms 
-    ON COALESCE(gst.salesforce_id, gst_fallback.salesforce_id, act.salesforce_id_sales)::varchar = ms.salesforce_id::varchar 
+    ON act.salesforce_id_sales::integer = ms.salesforce_id::integer 
 
 LEFT JOIN latest_fcustsls vfs 
-    ON act.distributor_id::varchar = vfs.distributor_id::varchar 
-   AND act.outlet_id::varchar = vfs.cust_id::varchar 
+    ON act.distributor_id::integer = vfs.distributor_id::integer 
+   AND act.outlet_id::integer = vfs.cust_id::integer 
    AND vfs.rn = 1
 
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
     ON vfs.channel_id::varchar = mcs.channel_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON COALESCE(gst.salesforce_id, gst_fallback.salesforce_id, act.salesforce_id_sales)::varchar = mgc.salesforce_id::varchar
+    ON act.salesforce_id_sales::integer = mgc.salesforce_id::integer
