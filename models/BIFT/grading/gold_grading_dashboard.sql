@@ -21,8 +21,32 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE IR / VISIBILITY (AI + MANUAL BANDING) LOCKED TO PCODE & VISIT
-cte_avis AS (
+-- 1. CTE GRADING STORE LEVEL (Hasil Kalkulasi Nilai Atas PCode IR)
+cte_grading_store AS (
+    SELECT 
+        COALESCE(b.distributor_id::varchar, g.distributor_id::varchar) AS distributor_id,
+        COALESCE(b.outlet_id::varchar, g.outlet_id::varchar) AS outlet_id,
+        COALESCE(b.sls_id::varchar, g.sls_id::varchar) AS sls_id,
+        COALESCE(b.kode_ap::varchar, g.kode_ap::varchar) AS kode_ap,
+        COALESCE(b.visit_date, g.visit_date) AS visit_date,
+        COALESCE(b.salesforce_id::varchar, g.salesforce_id::varchar) AS salesforce_id,
+        COALESCE(b.team_id::varchar, g.team_id::varchar) AS team_id,
+        COALESCE(b.grade, g.grade) AS final_grade,
+        c.year,
+        c.period,
+        c.week
+    FROM raw_ficom_m3.t_grading_ir g
+    LEFT JOIN raw_ficom_m3.t_grading_banding b
+        ON g.distributor_id::varchar = b.distributor_id::varchar
+       AND g.sls_id::varchar = b.sls_id::varchar
+       AND g.outlet_id::varchar = b.outlet_id::varchar
+       AND g.visit_date = b.visit_date
+       AND g.kode_ap::varchar = b.kode_ap::varchar
+    LEFT JOIN spx.m_cycle3 c ON COALESCE(b.visit_date, g.visit_date)::date = c.cdate::date
+),
+
+-- 2. CTE TABEL IR MURNI (Eksistensi Foto Display per PCode)
+cte_avis_item AS (
     SELECT 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
         COALESCE(m.outlet_id::varchar, a.outlet_id::varchar) AS outlet_id,
@@ -30,7 +54,8 @@ cte_avis AS (
         COALESCE(m.kode_ap::varchar, a.kode_ap::varchar) AS kode_ap,
         COALESCE(m.pcode::varchar, a.pcode::varchar) AS pcode,
         COALESCE(m.visit_date, a.visit_date) AS visit_date,
-        SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing
+        SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
+        1 AS is_in_ir_table -- FLAG KHUSUS: MENANDAKAN MEMANG ADA DI TABEL IR
     FROM raw_ficom_m3.t_rcall_avis_d a
     FULL OUTER JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
@@ -48,28 +73,8 @@ cte_avis AS (
         COALESCE(m.visit_date, a.visit_date)
 ),
 
--- 2. CTE GRADING SUMMARY (STORE VISIT LEVEL)
-cte_grading AS (
-    SELECT 
-        COALESCE(b.distributor_id::varchar, g.distributor_id::varchar) AS distributor_id,
-        COALESCE(b.outlet_id::varchar, g.outlet_id::varchar) AS outlet_id,
-        COALESCE(b.sls_id::varchar, g.sls_id::varchar) AS sls_id,
-        COALESCE(b.kode_ap::varchar, g.kode_ap::varchar) AS kode_ap,
-        COALESCE(b.visit_date, g.visit_date) AS visit_date,
-        COALESCE(b.salesforce_id::varchar, g.salesforce_id::varchar) AS salesforce_id,
-        COALESCE(b.team_id::varchar, g.team_id::varchar) AS team_id,
-        COALESCE(b.grade, g.grade) AS final_grade
-    FROM raw_ficom_m3.t_grading_ir g
-    LEFT JOIN raw_ficom_m3.t_grading_banding b
-        ON g.distributor_id::varchar = b.distributor_id::varchar
-       AND g.sls_id::varchar = b.sls_id::varchar
-       AND g.outlet_id::varchar = b.outlet_id::varchar
-       AND g.visit_date = b.visit_date
-       AND g.kode_ap::varchar = b.kode_ap::varchar
-),
-
--- 3. CTE TRANSAKSI SALES (LOCKED TO PCODE & CYCLE WEEK)
-cte_sales AS (
+-- 3. CTE TRANSAKSI SALES SFA
+cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
         s.custno::varchar AS outlet_id,
@@ -94,66 +99,38 @@ cte_sales AS (
         c.year, c.period, c.week
 ),
 
--- 4. COMBINE IR + GRADING (LOCKED BY VISIT KEY)
-cte_ir_graded AS (
+-- 4. KONSOLIDASI ITEM ACTIVITY
+item_activity AS (
     SELECT 
-        av.distributor_id,
-        av.outlet_id,
-        av.sls_id,
-        av.kode_ap,
-        av.pcode,
-        av.visit_date,
-        av.total_facing,
-        gr.salesforce_id,
-        gr.team_id,
-        gr.final_grade,
-        c.year,
-        c.period,
-        c.week
-    FROM cte_avis av
-    LEFT JOIN cte_grading gr
-        ON av.distributor_id = gr.distributor_id
-       AND av.outlet_id = gr.outlet_id
-       AND av.sls_id = gr.sls_id
-       AND av.kode_ap = gr.kode_ap
-       AND av.visit_date = gr.visit_date
-    LEFT JOIN spx.m_cycle3 c 
-        ON av.visit_date::date = c.cdate::date
-),
-
--- 5. BASE FULL OUTER JOIN BETWEEN IR_GRADED AND SALES (LOCKED TO DIST + OUTLET + PCODE + WEEK)
-base_activity AS (
-    SELECT 
-        COALESCE(ir.distributor_id, s.distributor_id) AS distributor_id,
-        COALESCE(ir.outlet_id, s.outlet_id) AS outlet_id,
-        COALESCE(ir.sls_id, s.sls_id) AS sls_id,
-        COALESCE(ir.salesforce_id, s.salesforce_id) AS salesforce_id,
-        COALESCE(ir.pcode, s.pcode) AS pcode,
-        COALESCE(ir.kode_ap, 'N/A') AS kode_ap,
-        COALESCE(ir.year, s.year) AS year,
-        COALESCE(ir.period, s.period) AS period,
-        COALESCE(ir.week, s.week) AS week,
-        COALESCE(ir.visit_date, s.max_inv_date) AS activity_date,
+        COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
+        COALESCE(av.outlet_id, s.outlet_id) AS outlet_id,
+        COALESCE(av.sls_id, s.sls_id) AS sls_id,
+        s.salesforce_id AS salesforce_id_sales,
+        COALESCE(av.pcode, s.pcode) AS pcode,
+        COALESCE(av.kode_ap, 'N/A') AS kode_ap,
+        COALESCE(c_av.year, s.year) AS year,
+        COALESCE(c_av.period, s.period) AS period,
+        COALESCE(c_av.week, s.week) AS week,
+        COALESCE(av.visit_date, s.max_inv_date) AS activity_date,
         
-        ir.final_grade,
-        ir.team_id,
-        COALESCE(ir.total_facing, 0) AS total_facing,
+        COALESCE(av.total_facing, 0) AS total_facing,
+        COALESCE(av.is_in_ir_table, 0) AS is_in_ir_table, -- BUKTI EKSISTENSI DI TABEL IR
         COALESCE(s.total_inv_qty, 0) AS total_inv_qty,
         COALESCE(s.total_inv_val, 0) AS total_inv_val
-    FROM cte_ir_graded ir
-    FULL OUTER JOIN cte_sales s
-        ON ir.distributor_id::integer = s.distributor_id::integer
-       AND ir.outlet_id::integer = s.outlet_id::integer
-       AND ir.pcode::varchar = s.pcode::varchar
-       AND ir.year = s.year
-       AND ir.week = s.week
+    FROM cte_avis_item av
+    FULL OUTER JOIN cte_sales_item s
+        ON av.distributor_id::integer = s.distributor_id::integer
+       AND av.outlet_id::integer = s.outlet_id::integer
+       AND av.pcode::varchar = s.pcode::varchar
+       AND av.sls_id::varchar = s.sls_id::varchar
+    LEFT JOIN spx.m_cycle3 c_av ON av.visit_date::date = c_av.cdate::date
 )
 
 -- MAIN QUERY
 SELECT 
-    base.year,
-    base.period,
-    base.week,
+    act.year,
+    act.period,
+    act.week,
     
     -- Hierarki Sales
     b.sd_id,
@@ -166,17 +143,17 @@ SELECT
     b.rsm_nm,
     b.ss_id,
     b.ss_nm,
-    base.sls_id,
-    base.distributor_id,
+    act.sls_id,
+    act.distributor_id,
 
     md.distributor_nm,
-    base.outlet_id,
+    act.outlet_id,
     mc.cust_nm,
     mc.city,
     
     -- Product & Salesforce
-    base.pcode,
-    base.salesforce_id,
+    act.pcode,
+    COALESCE(gst.salesforce_id, act.salesforce_id_sales) AS salesforce_id,
     ms.salesforce_nm,
     mgc.gsalesforce_id,
     mgc.gsalesforce_nm,
@@ -185,54 +162,77 @@ SELECT
     mgc.div_id,
     mgc.div_nm,
     
-    base.final_grade AS grade,
-    base.kode_ap,
-    base.team_id,
-    base.activity_date AS visit_date,
-
-    -- Metrics IR
-    base.total_facing AS facing_qty,
-    CASE WHEN base.total_facing > 0 THEN 1 ELSE 0 END AS is_ir_detected,
-
-    -- Metrics Transaksi
-    base.total_inv_qty AS inv_qty,
-    base.total_inv_val AS inv_val,
-    CASE WHEN base.total_inv_qty > 0 THEN 1 ELSE 0 END AS is_transaction_exist,
-
-    -- SENSE CHECK ANOMALY STATUS PRECISE LEVEL
+    -- 🎯 ATURAN MUTLAK: GRADING HANYA DIAMBIL JIKA ADA DATA DI TABEL IR (is_in_ir_table = 1)
     CASE 
-        WHEN base.total_facing > 0 AND base.total_inv_qty > 0 
+        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fallback.final_grade)
+        ELSE NULL 
+    END AS grade,
+    
+    act.kode_ap,
+    CASE 
+        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.team_id, gst_fallback.team_id) 
+        ELSE NULL 
+    END AS team_id,
+    
+    act.activity_date AS visit_date,
+
+    -- Metrics IR PCode
+    act.total_facing AS facing_qty,
+    act.is_in_ir_table AS is_ir_detected,
+
+    -- Metrics Transaksi PCode
+    act.total_inv_qty AS inv_qty,
+    act.total_inv_val AS inv_val,
+    CASE WHEN act.total_inv_qty > 0 THEN 1 ELSE 0 END AS is_transaction_exist,
+
+    -- SENSE CHECK ANOMALY STATUS
+    CASE 
+        WHEN act.is_in_ir_table = 1 AND act.total_inv_qty > 0 
             THEN '1. IR Terdeteksi & Ada Transaksi'
-        WHEN base.total_facing > 0 AND base.total_inv_qty = 0 
-            THEN '2. IR Terdeteksi & TANPA Transaksi (Anomali)'
-        WHEN base.total_facing = 0 AND base.total_inv_qty > 0 
-            THEN '3. IR Tidak Terdeteksi & Ada Transaksi'
-        ELSE '4. No Visit/IR & No Sales'
+        WHEN act.is_in_ir_table = 1 AND act.total_inv_qty = 0 
+            THEN '2. IR Terdeteksi & TANPA Transaksi (Anomali IR)'
+        WHEN act.is_in_ir_table = 0 AND act.total_inv_qty > 0 
+            THEN '3. Tidak Ada di Tabel IR & Ada Transaksi (Uncovered Sales)'
+        ELSE '4. No IR & No Sales'
     END AS anomaly_status
 
-FROM base_activity base
+FROM item_activity act
+
+-- Header Grade Toko
+LEFT JOIN cte_grading_store gst
+    ON act.distributor_id::integer = gst.distributor_id::integer
+   AND act.outlet_id::integer = gst.outlet_id::integer
+   AND act.sls_id::varchar = gst.sls_id::varchar
+   AND act.kode_ap = gst.kode_ap
+   AND act.activity_date = gst.visit_date
+
+LEFT JOIN cte_grading_store gst_fallback
+    ON act.distributor_id::integer = gst_fallback.distributor_id::integer
+   AND act.outlet_id::integer = gst_fallback.outlet_id::integer
+   AND act.sls_id::varchar = gst_fallback.sls_id::varchar
+   AND act.activity_date = gst_fallback.visit_date
 
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
-    ON base.sls_id::varchar = b.sls_id::varchar  
-   AND base.distributor_id::varchar = b.distributor_id::varchar
+    ON act.sls_id::varchar = b.sls_id::varchar  
+   AND act.distributor_id::varchar = b.distributor_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_distributor md 
-    ON base.distributor_id::varchar = md.distributor_id::varchar
+    ON act.distributor_id::varchar = md.distributor_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_customer mc 
-    ON base.distributor_id::varchar = mc.distributor_id::varchar 
-   AND base.outlet_id::varchar = mc.cust_id::varchar 
+    ON act.distributor_id::varchar = mc.distributor_id::varchar 
+   AND act.outlet_id::varchar = mc.cust_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_salesforce ms 
-    ON base.salesforce_id::varchar = ms.salesforce_id::varchar 
+    ON COALESCE(gst.salesforce_id, gst_fallback.salesforce_id, act.salesforce_id_sales)::varchar = ms.salesforce_id::varchar 
 
 LEFT JOIN latest_fcustsls vfs 
-    ON base.distributor_id::varchar = vfs.distributor_id::varchar 
-   AND base.outlet_id::varchar = vfs.cust_id::varchar 
+    ON act.distributor_id::varchar = vfs.distributor_id::varchar 
+   AND act.outlet_id::varchar = vfs.cust_id::varchar 
    AND vfs.rn = 1
 
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
     ON vfs.channel_id::varchar = mcs.channel_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON base.salesforce_id::varchar = mgc.salesforce_id::varchar
+    ON COALESCE(gst.salesforce_id, gst_fallback.salesforce_id, act.salesforce_id_sales)::varchar = mgc.salesforce_id::varchar
