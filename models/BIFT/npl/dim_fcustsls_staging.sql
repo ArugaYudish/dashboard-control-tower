@@ -53,7 +53,9 @@ SELECT
     loc.kecamatan_code,
     loc.kecamatan_name,
     loc.kelurahan_code,
-    loc.kelurahan_name
+    loc.kelurahan_name,
+    dc.latitude,
+    dc.longitude
 FROM {{ ref('stg_fcustsls') }} dfs
 LEFT JOIN bift.dim_customer dc 
     ON dc.distributor_id = dfs.distributor_id 
