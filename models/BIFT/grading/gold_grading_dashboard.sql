@@ -74,7 +74,7 @@ cte_sales AS (
     GROUP BY s.subdist_id::varchar, s.custno::varchar, s.slsno::varchar, c.year, c.period, c.week
 ),
 
--- 3. BASE KONSOLIDASI (FULL OUTER JOIN IR & SALES) -> INI KUNCI UTAMANYA!
+-- 3. BASE KONSOLIDASI (FULL OUTER JOIN IR & SALES)
 base_activity AS (
     SELECT 
         COALESCE(f.distributor_id, s.distributor_id) AS distributor_id,
@@ -124,7 +124,7 @@ SELECT
     base.period,
     base.week,
     
-    -- Hierarki Sales (LEFT JOIN dari Base agar sales tanpa IR tetap ikut)
+    -- Hierarki Sales
     b.sd_id,
     b.sd_nm,
     b.nsm_id,
@@ -166,7 +166,7 @@ SELECT
     base.total_inv_val AS inv_val,
     CASE WHEN base.total_inv_qty > 0 THEN 1 ELSE 0 END AS is_transaction_exist,
 
-    -- SENSE CHECK ANOMALY STATUS (SEKARANG STATUS 1 & 3 PASTI KELUAR)
+    -- SENSE CHECK ANOMALY STATUS
     CASE 
         WHEN base.total_facing > 0 AND base.total_inv_qty > 0 
             THEN '1. IR Terdeteksi & Ada Transaksi'
@@ -179,32 +179,26 @@ SELECT
 
 FROM base_activity base
 
--- Join Hierarki Salesman
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
     ON base.sls_id = b.sls_id::varchar  
    AND base.distributor_id = b.distributor_id::varchar
 
--- Join Grading
 LEFT JOIN grading_summary gr
     ON base.distributor_id = gr.distributor_id
    AND base.outlet_id = gr.outlet_id
    AND base.sls_id = gr.sls_id
    AND base.activity_date = gr.visit_date
 
--- Master Distributor
 LEFT JOIN raw_ficom_m3.m_distributor md 
     ON base.distributor_id = md.distributor_id::varchar
 
--- Master Customer
 LEFT JOIN raw_ficom_m3.m_customer mc 
     ON base.distributor_id = mc.distributor_id::varchar 
    AND base.outlet_id = mc.cust_id::varchar 
 
--- Master Salesforce
 LEFT JOIN raw_ficom_m3.m_salesforce ms 
     ON gr.salesforce_id = ms.salesforce_id::varchar 
 
--- Staging Channel
 LEFT JOIN latest_fcustsls vfs 
     ON base.distributor_id = vfs.distributor_id::varchar 
    AND base.outlet_id = vfs.cust_id::varchar 
@@ -214,4 +208,4 @@ LEFT JOIN raw_ficom_m3.m_group_channels mcs
     ON vfs.channel_id::varchar = mcs.channel_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON gr.salesforce_id = mgc.salesforce_id::varchar;
+    ON gr.salesforce_id = mgc.salesforce_id::varchar
