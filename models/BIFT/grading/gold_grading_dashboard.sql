@@ -42,9 +42,10 @@ cte_grading_store AS (
        AND g.visit_date = b.visit_date
        AND g.kode_ap::varchar = b.kode_ap::varchar
     LEFT JOIN spx.m_cycle3 c ON COALESCE(b.visit_date, g.visit_date)::date = c.cdate::date
+    WHERE COALESCE(b.visit_date, g.visit_date) >= '2025-01-01' -- Filter biar disk gak jebol
 ),
 
--- 2. CTE IR DISPLAY (Detail per PCode)
+-- 2. CTE IR DISPLAY (Agregasi Dulu per Key)
 cte_avis_item AS (
     SELECT 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
@@ -63,6 +64,7 @@ cte_avis_item AS (
        AND a.kode_ap::varchar = m.kode_ap::varchar
        AND a.pcode::varchar = m.pcode::varchar
        AND a.visit_date = m.visit_date
+    WHERE COALESCE(m.visit_date, a.visit_date) >= '2025-01-01'
     GROUP BY 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar),
         COALESCE(m.outlet_id::varchar, a.outlet_id::varchar),
@@ -88,7 +90,8 @@ cte_sales_item AS (
         SUM(COALESCE(s.inv_val::numeric, 0)) AS total_inv_val
     FROM raw_ho.vfsales_det s
     LEFT JOIN spx.m_cycle3 c ON s.inv_date::date = c.cdate::date
-    WHERE (COALESCE(s.inv_qty::numeric, 0) > 0 OR COALESCE(s.inv_val::numeric, 0) > 0)
+    WHERE s.inv_date >= '2025-01-01'
+      AND (COALESCE(s.inv_qty::numeric, 0) > 0 OR COALESCE(s.inv_val::numeric, 0) > 0)
     GROUP BY 
         s.subdist_id::varchar, 
         s.custno::varchar, 
@@ -98,7 +101,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY (SAFE VARCHAR MATCHING)
+-- 4. KONSOLIDASI ITEM ACTIVITY (FAST DIRECT VARCHAR MATCHING)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -118,10 +121,10 @@ item_activity AS (
         COALESCE(s.total_inv_val, 0) AS total_inv_val
     FROM cte_avis_item av
     FULL OUTER JOIN cte_sales_item s
-        ON TRIM(av.distributor_id) = TRIM(s.distributor_id)
-       AND TRIM(av.outlet_id) = TRIM(s.outlet_id)
-       AND TRIM(av.pcode) = TRIM(s.pcode)
-       AND TRIM(av.sls_id) = TRIM(s.sls_id)  -- Pakai String Trim, Aman dari Kena 'SL7'
+        ON av.distributor_id = s.distributor_id
+       AND av.outlet_id = s.outlet_id
+       AND av.pcode = s.pcode
+       AND av.sls_id = s.sls_id
     LEFT JOIN spx.m_cycle3 c_av ON av.visit_date::date = c_av.cdate::date
 )
 
@@ -199,40 +202,40 @@ FROM item_activity act
 
 -- Header Grade Toko
 LEFT JOIN cte_grading_store gst
-    ON TRIM(act.distributor_id) = TRIM(gst.distributor_id)
-   AND TRIM(act.outlet_id) = TRIM(gst.outlet_id)
-   AND TRIM(act.sls_id) = TRIM(gst.sls_id)
-   AND TRIM(act.kode_ap) = TRIM(gst.kode_ap)
+    ON act.distributor_id = gst.distributor_id
+   AND act.outlet_id = gst.outlet_id
+   AND act.sls_id = gst.sls_id
+   AND act.kode_ap = gst.kode_ap
    AND act.activity_date = gst.visit_date
 
 LEFT JOIN cte_grading_store gst_fallback
-    ON TRIM(act.distributor_id) = TRIM(gst_fallback.distributor_id)
-   AND TRIM(act.outlet_id) = TRIM(gst_fallback.outlet_id)
-   AND TRIM(act.sls_id) = TRIM(gst_fallback.sls_id)
+    ON act.distributor_id = gst_fallback.distributor_id
+   AND act.outlet_id = gst_fallback.outlet_id
+   AND act.sls_id = gst_fallback.sls_id
    AND act.activity_date = gst_fallback.visit_date
 
--- Join Hierarki Salesman (String Safe)
+-- Join Hierarki
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
-    ON TRIM(act.sls_id) = TRIM(b.sls_id::varchar)  
-   AND TRIM(act.distributor_id) = TRIM(b.distributor_id::varchar)
+    ON act.sls_id = b.sls_id::varchar  
+   AND act.distributor_id = b.distributor_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_distributor md 
-    ON TRIM(act.distributor_id) = TRIM(md.distributor_id::varchar)
+    ON act.distributor_id = md.distributor_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_customer mc 
-    ON TRIM(act.distributor_id) = TRIM(mc.distributor_id::varchar) 
-   AND TRIM(act.outlet_id) = TRIM(mc.cust_id::varchar) 
+    ON act.distributor_id = mc.distributor_id::varchar 
+   AND act.outlet_id = mc.cust_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_salesforce ms 
-    ON TRIM(act.salesforce_id_sales) = TRIM(ms.salesforce_id::varchar) 
+    ON act.salesforce_id_sales = ms.salesforce_id::varchar 
 
 LEFT JOIN latest_fcustsls vfs 
-    ON TRIM(act.distributor_id) = TRIM(vfs.distributor_id) 
-   AND TRIM(act.outlet_id) = TRIM(vfs.cust_id) 
+    ON act.distributor_id = vfs.distributor_id 
+   AND act.outlet_id = vfs.cust_id 
    AND vfs.rn = 1
 
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
-    ON TRIM(vfs.channel_id) = TRIM(mcs.channel_id::varchar) 
+    ON vfs.channel_id = mcs.channel_id::varchar 
 
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON TRIM(act.salesforce_id_sales) = TRIM(mgc.salesforce_id::varchar)
+    ON act.salesforce_id_sales = mgc.salesforce_id::varchar
