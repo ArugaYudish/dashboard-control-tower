@@ -7,17 +7,19 @@
       {'columns': ['distributor_id', 'outlet_id', 'pcode']},
       {'columns': ['subbrand_id']},
       {'columns': ['gsalesforce_id']},
-      {'columns': ['group_channel_id']}
+      {'columns': ['group_channel_id']},
+      {'columns': ['sls_id']}
     ]
   )
 }}
+
 -- 0. CTE STAGING OUTLET & SALESFORCE FALLBACK
 WITH latest_fcustsls AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
         cust_id::varchar AS cust_id,
         channel_id::varchar AS channel_id,
-        salesforce_id::varchar AS salesforce_id, -- Kolom salesforce_id dari v_fcustsls_staging
+        salesforce_id::varchar AS salesforce_id,
         ROW_NUMBER() OVER (
             PARTITION BY distributor_id::varchar, cust_id::varchar 
             ORDER BY tahun DESC, periode DESC
@@ -25,17 +27,21 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. ANCHOR HIERARKI SALESMAN M3
+-- 1. ANCHOR HIERARKI SALESMAN M3 (DENGAN LEFT JOIN KE MASTER SALESMAN UNTUK MENDAPATKAN sls_nm)
 cte_m3_hierarchy AS (
     SELECT DISTINCT
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        sd_id, sd_nm,
-        nsm_id, nsm_nm,
-        grsm_id, grsm_nm,
-        rsm_id, rsm_nm,
-        ss_id, ss_nm
-    FROM raw_ficom_m3.v_salesman_hierarchy
+        h.distributor_id::varchar AS distributor_id,
+        h.sls_id::varchar AS sls_id,
+        COALESCE(ms.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm, -- 👈 CATCHING NAMA SALESMAN
+        h.sd_id, h.sd_nm,
+        h.nsm_id, h.nsm_nm,
+        h.grsm_id, h.grsm_nm,
+        h.rsm_id, h.rsm_nm,
+        h.ss_id, h.ss_nm
+    FROM raw_ficom_m3.v_salesman_hierarchy h
+    LEFT JOIN raw_ficom_m3.m_salesman ms
+        ON h.sls_id::varchar = ms.sls_id::varchar
+       AND h.distributor_id::varchar = ms.distributor_id::varchar
 ),
 
 -- 2A. GRADING STORE LEVEL
@@ -163,13 +169,14 @@ SELECT
     act.week,
     act.activity_date AS visit_date,
     
-    -- 1. HIERARKI SALESMAN
+    -- 1. HIERARKI SALESMAN & NAMA SALESMAN (sls_nm)
     h.sd_id, h.sd_nm,
     h.nsm_id, h.nsm_nm,
     h.grsm_id, h.grsm_nm,
     h.rsm_id, h.rsm_nm,
     h.ss_id, h.ss_nm,
     act.sls_id,
+    COALESCE(h.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm, -- 👈 DIPILIH DI SELECT UTAMA
     
     -- 2. DISTRIBUTOR & OUTLET
     act.distributor_id,
@@ -178,7 +185,7 @@ SELECT
     mc.cust_nm,
     mc.city,
     
-    -- 3. PRODUCT & SUBBRAND HIERARCHY (DENGAN FALLBACK POSM / UNMAPPED)
+    -- 3. PRODUCT & SUBBRAND HIERARCHY
     act.pcode,
     COALESCE(mp.pcode_nm, 'PCODE - ' || act.pcode) AS pcode_nm,
     COALESCE(mms.subbrand_id, 'UNMAPPED_SUBBRAND') AS subbrand_id,
@@ -188,7 +195,7 @@ SELECT
     COALESCE(mms.gdiv_id, 'UNMAPPED_GDIV') AS gdiv_id,
     COALESCE(mms.gdiv_nm, 'OTHERS / UNMAPPED') AS gdiv_nm,
     
-    -- 4. SALESFORCE & GROUP CHANNEL (WITH FALLBACK STAGING FCUSTSLS)
+    -- 4. SALESFORCE & GROUP CHANNEL
     COALESCE(act.salesforce_id_sales, vfs.salesforce_id, 'N/A') AS salesforce_id,
     COALESCE(ms.salesforce_nm, 'UNMAPPED SALESFORCE') AS salesforce_nm,
     COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
@@ -250,13 +257,13 @@ LEFT JOIN raw_ficom_m3.m_mapping_subbrand mms
 LEFT JOIN raw_ficom_m3.m_distributor md ON act.distributor_id = md.distributor_id::varchar
 LEFT JOIN raw_ficom_m3.m_customer mc ON act.distributor_id = mc.distributor_id::varchar AND act.outlet_id = mc.cust_id::varchar
 
--- STAGING OUTLET (UNTUK FALLBACK SALESFORCE ID DARI OUTLET)
+-- STAGING OUTLET
 LEFT JOIN latest_fcustsls vfs 
     ON act.distributor_id = vfs.distributor_id 
    AND act.outlet_id = vfs.cust_id 
    AND vfs.rn = 1
 
--- MASTER SALESFORCE (JOIN DENGAN COALESCE SALESFORCE_ID)
+-- MASTER SALESFORCE
 LEFT JOIN raw_ficom_m3.m_salesforce ms 
     ON COALESCE(act.salesforce_id_sales, vfs.salesforce_id) = ms.salesforce_id::varchar
 
