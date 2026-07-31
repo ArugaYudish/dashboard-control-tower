@@ -21,13 +21,13 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL
+-- 1. CTE GRADING STORE LEVEL (LEFT JOIN: t_grading_ir sebagai Utama, Banding sebagai Override)
 cte_grading_store AS (
     SELECT 
-        COALESCE(b.distributor_id::varchar, g.distributor_id::varchar) AS distributor_id,
-        COALESCE(b.outlet_id::varchar, g.outlet_id::varchar) AS outlet_id,
-        COALESCE(b.sls_id::varchar, g.sls_id::varchar) AS sls_id,
-        COALESCE(b.kode_ap::varchar, g.kode_ap::varchar) AS kode_ap,
+        g.distributor_id::varchar AS distributor_id,
+        g.outlet_id::varchar AS outlet_id,
+        g.sls_id::varchar AS sls_id,
+        g.kode_ap::varchar AS kode_ap,
         c.year,
         c.period,
         c.week,
@@ -41,64 +41,56 @@ cte_grading_store AS (
        AND g.outlet_id::varchar = b.outlet_id::varchar
        AND g.visit_date = b.visit_date
        AND g.kode_ap::varchar = b.kode_ap::varchar
-    LEFT JOIN spx.m_cycle3 c ON COALESCE(b.visit_date, g.visit_date)::date = c.cdate::date
-    WHERE COALESCE(b.visit_date, g.visit_date) >= '2025-01-01'
+    LEFT JOIN spx.m_cycle3 c ON g.visit_date::date = c.cdate::date
+    WHERE g.visit_date >= '2025-01-01'
     GROUP BY 
-        COALESCE(b.distributor_id::varchar, g.distributor_id::varchar),
-        COALESCE(b.outlet_id::varchar, g.outlet_id::varchar),
-        COALESCE(b.sls_id::varchar, g.sls_id::varchar),
-        COALESCE(b.kode_ap::varchar, g.kode_ap::varchar),
+        g.distributor_id::varchar,
+        g.outlet_id::varchar,
+        g.sls_id::varchar,
+        g.kode_ap::varchar,
         c.year, c.period, c.week
 ),
 
--- 2A. CTE IR DAILY (Kunci Identik 1-to-1 dengan Source Raw IR Harian)
-cte_avis_daily AS (
+-- 2. CTE IR DISPLAY (LEFT JOIN: t_rcall_avis_d sebagai Utama, Banding sebagai Override)
+cte_avis_raw_joined AS (
     SELECT 
-        COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
-        COALESCE(m.outlet_id::varchar, a.outlet_id::varchar) AS outlet_id,
-        COALESCE(m.sls_id::varchar, a.sls_id::varchar) AS sls_id,
-        COALESCE(m.kode_ap::varchar, a.kode_ap::varchar) AS kode_ap,
-        COALESCE(m.pcode::varchar, a.pcode::varchar) AS pcode,
-        COALESCE(m.visit_date, a.visit_date) AS visit_date,
-        SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS daily_facing
+        a.distributor_id::varchar AS distributor_id,
+        a.outlet_id::varchar AS outlet_id,
+        a.sls_id::varchar AS sls_id,
+        a.kode_ap::varchar AS kode_ap,
+        a.pcode::varchar AS pcode,
+        a.visit_date AS visit_date,
+        COALESCE(m.count_facing::integer, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
-    FULL OUTER JOIN raw_ficom_m3.t_rcall_avis_manual m 
+    LEFT JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
        AND a.outlet_id::varchar = m.outlet_id::varchar
        AND a.sls_id::varchar = m.sls_id::varchar
        AND a.kode_ap::varchar = m.kode_ap::varchar
        AND a.pcode::varchar = m.pcode::varchar
        AND a.visit_date = m.visit_date
-    WHERE COALESCE(m.visit_date, a.visit_date) >= '2025-01-01'
-    GROUP BY 
-        COALESCE(m.distributor_id::varchar, a.distributor_id::varchar),
-        COALESCE(m.outlet_id::varchar, a.outlet_id::varchar),
-        COALESCE(m.sls_id::varchar, a.sls_id::varchar),
-        COALESCE(m.kode_ap::varchar, a.kode_ap::varchar),
-        COALESCE(m.pcode::varchar, a.pcode::varchar),
-        COALESCE(m.visit_date, a.visit_date)
+    WHERE a.visit_date >= '2025-01-01'
 ),
 
--- 2B. CTE IR WEEKLY (Agregasi Bersih ke Level Cycle Week)
 cte_avis_item AS (
     SELECT 
-        d.distributor_id,
-        d.outlet_id,
-        d.pcode,
+        r.distributor_id,
+        r.outlet_id,
+        r.pcode,
         c.year,
         c.period,
         c.week,
-        MAX(d.sls_id) AS sls_id,
-        MAX(d.kode_ap) AS kode_ap,
-        MAX(d.visit_date) AS max_visit_date,
-        SUM(d.daily_facing) AS total_facing,
+        MAX(r.sls_id) AS sls_id,
+        MAX(r.kode_ap) AS kode_ap,
+        MAX(r.visit_date) AS max_visit_date,
+        SUM(r.count_facing) AS total_facing,
         1 AS is_in_ir_table
-    FROM cte_avis_daily d
-    LEFT JOIN spx.m_cycle3 c ON d.visit_date::date = c.cdate::date
+    FROM cte_avis_raw_joined r
+    LEFT JOIN spx.m_cycle3 c ON r.visit_date::date = c.cdate::date
     GROUP BY 
-        d.distributor_id,
-        d.outlet_id,
-        d.pcode,
+        r.distributor_id,
+        r.outlet_id,
+        r.pcode,
         c.year, c.period, c.week
 ),
 
