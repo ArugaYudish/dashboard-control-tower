@@ -51,20 +51,16 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY (Agregasi Murni Level Store + PCode + Week)
-cte_avis_item AS (
+-- 2A. CTE IR DAILY (Kunci Identik 1-to-1 dengan Source Raw IR Harian)
+cte_avis_daily AS (
     SELECT 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar) AS distributor_id,
         COALESCE(m.outlet_id::varchar, a.outlet_id::varchar) AS outlet_id,
+        COALESCE(m.sls_id::varchar, a.sls_id::varchar) AS sls_id,
+        COALESCE(m.kode_ap::varchar, a.kode_ap::varchar) AS kode_ap,
         COALESCE(m.pcode::varchar, a.pcode::varchar) AS pcode,
-        c.year,
-        c.period,
-        c.week,
-        MAX(COALESCE(m.sls_id::varchar, a.sls_id::varchar)) AS sls_id,
-        MAX(COALESCE(m.kode_ap::varchar, a.kode_ap::varchar)) AS kode_ap,
-        MAX(COALESCE(m.visit_date, a.visit_date)) AS max_visit_date,
-        SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
-        1 AS is_in_ir_table
+        COALESCE(m.visit_date, a.visit_date) AS visit_date,
+        SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS daily_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
     FULL OUTER JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
@@ -73,16 +69,40 @@ cte_avis_item AS (
        AND a.kode_ap::varchar = m.kode_ap::varchar
        AND a.pcode::varchar = m.pcode::varchar
        AND a.visit_date = m.visit_date
-    LEFT JOIN spx.m_cycle3 c ON COALESCE(m.visit_date, a.visit_date)::date = c.cdate::date
     WHERE COALESCE(m.visit_date, a.visit_date) >= '2025-01-01'
     GROUP BY 
         COALESCE(m.distributor_id::varchar, a.distributor_id::varchar),
         COALESCE(m.outlet_id::varchar, a.outlet_id::varchar),
+        COALESCE(m.sls_id::varchar, a.sls_id::varchar),
+        COALESCE(m.kode_ap::varchar, a.kode_ap::varchar),
         COALESCE(m.pcode::varchar, a.pcode::varchar),
+        COALESCE(m.visit_date, a.visit_date)
+),
+
+-- 2B. CTE IR WEEKLY (Agregasi Bersih ke Level Cycle Week)
+cte_avis_item AS (
+    SELECT 
+        d.distributor_id,
+        d.outlet_id,
+        d.pcode,
+        c.year,
+        c.period,
+        c.week,
+        MAX(d.sls_id) AS sls_id,
+        MAX(d.kode_ap) AS kode_ap,
+        MAX(d.visit_date) AS max_visit_date,
+        SUM(d.daily_facing) AS total_facing,
+        1 AS is_in_ir_table
+    FROM cte_avis_daily d
+    LEFT JOIN spx.m_cycle3 c ON d.visit_date::date = c.cdate::date
+    GROUP BY 
+        d.distributor_id,
+        d.outlet_id,
+        d.pcode,
         c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA (Agregasi Murni Level Store + PCode + Week)
+-- 3. CTE TRANSAKSI SALES SFA
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -107,12 +127,12 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY (1 TO 1 UNIQUE JOIN PER DIST + OUTLET + PCODE + YEAR + WEEK)
+-- 4. KONSOLIDASI ITEM ACTIVITY
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
         COALESCE(av.outlet_id, s.outlet_id) AS outlet_id,
-        COALESCE(s.sls_id, av.sls_id) AS sls_id, -- Prioritaskan sls_id transaksi
+        COALESCE(s.sls_id, av.sls_id) AS sls_id,
         s.salesforce_id AS salesforce_id_sales,
         COALESCE(av.pcode, s.pcode) AS pcode,
         COALESCE(av.kode_ap, 'N/A') AS kode_ap,
