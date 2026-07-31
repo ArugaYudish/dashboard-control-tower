@@ -4,17 +4,19 @@
     indexes = [
       {'columns': ['distributor_id', 'outlet_id', 'pcode']},
       {'columns': ['subbrand_id']},
-      {'columns': ['anomaly_status']},
+      {'columns': ['salesforce_id']},
       {'columns': ['year', 'period', 'week']}
     ]
   )
 }}
 
+-- 0. CTE STAGING OUTLET & SALESFORCE FALLBACK
 WITH latest_fcustsls AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
         cust_id::varchar AS cust_id,
         channel_id::varchar AS channel_id,
+        salesforce_id::varchar AS salesforce_id, -- Kolom salesforce_id dari v_fcustsls_staging
         ROW_NUMBER() OVER (
             PARTITION BY distributor_id::varchar, cust_id::varchar 
             ORDER BY tahun DESC, periode DESC
@@ -22,7 +24,7 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 0. ANCHOR HIERARKI SALESMAN M3
+-- 1. ANCHOR HIERARKI SALESMAN M3
 cte_m3_hierarchy AS (
     SELECT DISTINCT
         distributor_id::varchar AS distributor_id,
@@ -35,7 +37,7 @@ cte_m3_hierarchy AS (
     FROM raw_ficom_m3.v_salesman_hierarchy
 ),
 
--- 1A. GRADING STORE LEVEL
+-- 2A. GRADING STORE LEVEL
 cte_grading_store AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
@@ -66,7 +68,7 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 1B. GRADING STORE FALLBACK (Store + Week Unik)
+-- 2B. GRADING STORE FALLBACK (Store + Week Unik)
 cte_grading_store_fallback AS (
     SELECT 
         distributor_id, outlet_id, year, period, week,
@@ -76,7 +78,7 @@ cte_grading_store_fallback AS (
     GROUP BY distributor_id, outlet_id, year, period, week
 ),
 
--- 2. IR DISPLAY
+-- 3. IR DISPLAY
 cte_manual_dedup AS (
     SELECT 
         distributor_id::varchar AS distributor_id, outlet_id::varchar AS outlet_id,
@@ -112,7 +114,7 @@ cte_avis_item AS (
     GROUP BY r.distributor_id, r.outlet_id, r.pcode, c.year, c.period, c.week
 ),
 
--- 3. TRANSAKSI SALES SFA
+-- 4. TRANSAKSI SALES SFA
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id, s.custno::varchar AS outlet_id, s.pcode::varchar AS pcode,
@@ -129,7 +131,7 @@ cte_sales_item AS (
     GROUP BY s.subdist_id::varchar, s.custno::varchar, s.pcode::varchar, c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY
+-- 5. KONSOLIDASI ITEM ACTIVITY
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -153,7 +155,7 @@ item_activity AS (
        AND av.pcode = s.pcode AND av.year = s.year AND av.week = s.week
 )
 
--- MAIN QUERY FULL ATTRIBUTES FOR METABASE FILTERS
+-- MAIN QUERY FULL ATTRIBUTES & FALLBACKS
 SELECT 
     act.year,
     act.period,
@@ -175,20 +177,25 @@ SELECT
     mc.cust_nm,
     mc.city,
     
-    -- 3. PRODUCT & SUBBRAND HIERARCHY
+    -- 3. PRODUCT & SUBBRAND HIERARCHY (DENGAN FALLBACK POSM / UNMAPPED)
     act.pcode,
-    mp.pcode_nm,
-    (mp.prlin::varchar || mp.brand::varchar || mp.sbra1::varchar) AS subbrand_id,
-    mms.subbrand_nm,
-    mms.cat_id, mms.cat_nm,
-    mms.gdiv_id, mms.gdiv_nm,
+    COALESCE(mp.pcode_nm, 'PCODE - ' || act.pcode) AS pcode_nm,
+    COALESCE(mms.subbrand_id, 'UNMAPPED_SUBBRAND') AS subbrand_id,
+    COALESCE(mms.subbrand_nm, 'OTHERS / UNMAPPED') AS subbrand_nm,
+    COALESCE(mms.cat_id, 'UNMAPPED_CAT') AS cat_id,
+    COALESCE(mms.cat_nm, 'OTHERS / UNMAPPED') AS cat_nm,
+    COALESCE(mms.gdiv_id, 'UNMAPPED_GDIV') AS gdiv_id,
+    COALESCE(mms.gdiv_nm, 'OTHERS / UNMAPPED') AS gdiv_nm,
     
-    -- 4. SALESFORCE & GROUP CHANNEL
-    act.salesforce_id_sales AS salesforce_id,
-    ms.salesforce_nm,
-    mgc.gsalesforce_id, mgc.gsalesforce_nm,
-    mcs.group_channel_id, mcs.group_channel_nm,
-    mgc.div_id, mgc.div_nm,
+    -- 4. SALESFORCE & GROUP CHANNEL (WITH FALLBACK STAGING FCUSTSLS)
+    COALESCE(act.salesforce_id_sales, vfs.salesforce_id, 'N/A') AS salesforce_id,
+    COALESCE(ms.salesforce_nm, 'UNMAPPED SALESFORCE') AS salesforce_nm,
+    COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
+    COALESCE(mgc.gsalesforce_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
+    COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
+    COALESCE(mcs.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
+    COALESCE(mgc.div_id, 'UNMAPPED_DIV') AS div_id,
+    COALESCE(mgc.div_nm, 'OTHERS / UNMAPPED') AS div_nm,
     
     -- 5. GRADE TOKO
     CASE 
@@ -231,16 +238,29 @@ LEFT JOIN cte_grading_store_fallback gst_fb
     ON act.distributor_id = gst_fb.distributor_id AND act.outlet_id = gst_fb.outlet_id
    AND act.year = gst_fb.year AND act.week = gst_fb.week
 
--- MASTER TABLES & PRODUCT HIERARCHY
+-- MASTER PRODUCT & SUBBRAND MAPPING
 LEFT JOIN raw_ficom_m3.m_product mp 
     ON act.pcode = mp.pcode::varchar
 
 LEFT JOIN raw_ficom_m3.m_mapping_subbrand mms 
     ON (mp.prlin::varchar || mp.brand::varchar || mp.sbra1::varchar) = mms.subbrand_id::varchar
 
+-- MASTER DISTRIBUTOR & CUSTOMER
 LEFT JOIN raw_ficom_m3.m_distributor md ON act.distributor_id = md.distributor_id::varchar
 LEFT JOIN raw_ficom_m3.m_customer mc ON act.distributor_id = mc.distributor_id::varchar AND act.outlet_id = mc.cust_id::varchar
-LEFT JOIN raw_ficom_m3.m_salesforce ms ON act.salesforce_id_sales = ms.salesforce_id::varchar
-LEFT JOIN latest_fcustsls vfs ON act.distributor_id = vfs.distributor_id AND act.outlet_id = vfs.cust_id AND vfs.rn = 1
-LEFT JOIN raw_ficom_m3.m_group_channels mcs ON vfs.channel_id = mcs.channel_id::varchar
-LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc ON act.salesforce_id_sales = mgc.salesforce_id::varchar
+
+-- STAGING OUTLET (UNTUK FALLBACK SALESFORCE ID DARI OUTLET)
+LEFT JOIN latest_fcustsls vfs 
+    ON act.distributor_id = vfs.distributor_id 
+   AND act.outlet_id = vfs.cust_id 
+   AND vfs.rn = 1
+
+-- MASTER SALESFORCE (JOIN DENGAN COALESCE SALESFORCE_ID)
+LEFT JOIN raw_ficom_m3.m_salesforce ms 
+    ON COALESCE(act.salesforce_id_sales, vfs.salesforce_id) = ms.salesforce_id::varchar
+
+LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
+    ON COALESCE(act.salesforce_id_sales, vfs.salesforce_id) = mgc.salesforce_id::varchar
+
+LEFT JOIN raw_ficom_m3.m_group_channels mcs 
+    ON vfs.channel_id = mcs.channel_id::varchar
