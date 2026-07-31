@@ -63,7 +63,6 @@ cte_avis_raw_joined AS (
         a.kode_ap::varchar AS kode_ap,
         a.pcode::varchar AS pcode,
         a.visit_date AS visit_date,
-        COALESCE(a.team_id::varchar, '') AS team_id,
         COALESCE(m.count_facing::integer, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
     LEFT JOIN raw_ficom_m3.t_rcall_avis_manual m 
@@ -73,7 +72,6 @@ cte_avis_raw_joined AS (
        AND a.kode_ap::varchar        = m.kode_ap::varchar
        AND a.pcode::varchar          = m.pcode::varchar
        AND a.visit_date              = m.visit_date
-       AND COALESCE(a.team_id::varchar, '') = COALESCE(m.team_id::varchar, '')
     WHERE a.visit_date >= '2025-01-01'
 ),
 
