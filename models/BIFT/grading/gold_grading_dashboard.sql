@@ -2,14 +2,15 @@
   config(
     materialized = 'table',
     indexes = [
+      {'columns': ['year', 'period', 'week']},
+      {'columns': ['sd_id', 'nsm_id', 'grsm_id', 'rsm_id', 'ss_id']},
       {'columns': ['distributor_id', 'outlet_id', 'pcode']},
       {'columns': ['subbrand_id']},
-      {'columns': ['salesforce_id']},
-      {'columns': ['year', 'period', 'week']}
+      {'columns': ['gsalesforce_id']},
+      {'columns': ['group_channel_id']}
     ]
   )
 }}
-
 -- 0. CTE STAGING OUTLET & SALESFORCE FALLBACK
 WITH latest_fcustsls AS (
     SELECT 
