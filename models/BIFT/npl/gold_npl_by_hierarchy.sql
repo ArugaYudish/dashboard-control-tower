@@ -34,11 +34,34 @@ trx_with_period AS (
         s.inv_no,
         s.pcode,
         s.inv_qty,
-        s.inv_val
+        s.inv_val,
+        -- Product info joined early (before CB Cover fan-out) for performance
+        f.pcode_nm,
+        COALESCE(
+            s.inv_qty::numeric / NULLIF(f.convunit2 * f.convunit3, 0),
+            0
+        )                           AS qty_carton,
+        f.gdiv_id,
+        f.gdiv_nm,
+        f.div_id,
+        f.div_nm,
+        f.team_id                   AS product_team_id,
+        f.team_nm                   AS product_team_nm,
+        f.class_team_id,
+        f.class_team_nm,
+        f.subbrand_id,
+        f.subbrand_nm,
+        f.cat_id,
+        f.cat_nm,
+        f.sbu_id,
+        f.sbu_nm
     FROM raw_ho.vfsales_det s
     -- Bridge: map daily ord_date -> tahun/periode via m_cycle3
     INNER JOIN spx.m_cycle3 c
             ON s.ord_date::date = c.cdate::date
+    -- Product lookup joined here (small dataset) instead of after 40G CB Cover fan-out
+    LEFT JOIN bift.dim_product f
+           ON s.pcode = f.pcode
     WHERE s.sts = '905'
 )
 
@@ -71,10 +94,10 @@ SELECT
     -- 5. Salesman & Salesforce
     sh.sls_id,
     sh.sls_nm,
-    sh.salesforce_id,
-    sh.salesforce_nm,
-    sh.gsalesforce_id,
-    sh.gsalesforce_nm,
+    cs.salesforce_id,
+    cs.salesforce_nm,
+    cs.gsalesforce_id,
+    cs.gsalesforce_nm,
     sh.salesforce_div_id,
     sh.salesforce_div_nm,
     sh.team_id,
@@ -107,10 +130,28 @@ SELECT
     -- 9. Transaction Detail (NULL when no transaction in this period)
     t.inv_no,
     t.pcode,
+    t.pcode_nm,
     t.inv_qty,
     t.inv_val,
+    t.qty_carton,
 
-    -- 10. CB & Transaction Flags
+    -- 10. Product Hierarchy
+    t.gdiv_id,
+    t.gdiv_nm,
+    t.div_id,
+    t.div_nm,
+    t.product_team_id,
+    t.product_team_nm,
+    t.class_team_id,
+    t.class_team_nm,
+    t.subbrand_id,
+    t.subbrand_nm,
+    t.cat_id,
+    t.cat_nm,
+    t.sbu_id,
+    t.sbu_nm,
+
+    -- 11. CB & Transaction Flags
     1                               AS is_cb,  -- always 1 since CB Cover is the driving table
     CASE
         WHEN COALESCE(t.inv_val, 0) > 0 THEN 1
@@ -131,3 +172,5 @@ LEFT JOIN trx_with_period t
       AND t.cust_id          = cs.cust_id
       AND t.tahun            = cs.tahun
       AND t.periode          = cs.periode
+
+-- Product data is already resolved inside trx_with_period CTE (early join for performance)
