@@ -21,7 +21,7 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 0. ANCHOR PALING KIRI: HIERARKI SALESMAN M3
+-- 0. ANCHOR PALING KIRI: HIERARKI SALESMAN M3 (DEDUPLIKASI UNIK)
 cte_m3_hierarchy AS (
     SELECT DISTINCT
         distributor_id::varchar AS distributor_id,
@@ -34,7 +34,7 @@ cte_m3_hierarchy AS (
     FROM raw_ficom_m3.v_salesman_hierarchy
 ),
 
--- 1. CTE GRADING STORE LEVEL (Locked ke Salesman M3)
+-- 1A. CTE GRADING STORE LEVEL (PER SLS_ID & KODE_AP)
 cte_grading_store AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
@@ -68,7 +68,21 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY (Locked Hanya Salesman yang Ada di Hierarki M3)
+-- 1B. CTE GRADING STORE FALLBACK (KUNCI MURNI STORE + WEEK SUPAYA TIDAK DUPLIKASI ROW!)
+cte_grading_store_fallback AS (
+    SELECT 
+        distributor_id,
+        outlet_id,
+        year,
+        period,
+        week,
+        MAX(team_id) AS team_id,
+        MAX(final_grade) AS final_grade
+    FROM cte_grading_store
+    GROUP BY distributor_id, outlet_id, year, period, week
+),
+
+-- 2. CTE IR DISPLAY (Pure M3)
 cte_manual_dedup AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
@@ -93,7 +107,6 @@ cte_avis_raw_joined AS (
         a.visit_date AS visit_date,
         COALESCE(m.count_facing, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
-    -- Filter IR: Hanya ambil aktivitas salesman M3
     INNER JOIN cte_m3_hierarchy h 
         ON a.sls_id::varchar = h.sls_id 
        AND a.distributor_id::varchar = h.distributor_id
@@ -129,7 +142,7 @@ cte_avis_item AS (
         c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA (Locked Hanya Salesman yang Ada di Hierarki M3)
+-- 3. CTE TRANSAKSI SALES SFA (Pure M3)
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -144,7 +157,6 @@ cte_sales_item AS (
         SUM(COALESCE(s.inv_qty::numeric, 0)) AS total_inv_qty,
         SUM(COALESCE(s.inv_val::numeric, 0)) AS total_inv_val
     FROM raw_ho.vfsales_det s
-    -- Filter Sales: Hanya ambil transaksi salesman M3
     INNER JOIN cte_m3_hierarchy h 
         ON s.slsno::varchar = h.sls_id 
        AND s.subdist_id::varchar = h.distributor_id
@@ -158,7 +170,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY (1-TO-1 MATCHING KHUSUS EKOSISTEM M3)
+-- 4. KONSOLIDASI ITEM ACTIVITY
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -191,7 +203,7 @@ SELECT
     act.period,
     act.week,
     
-    -- Hierarki Salesman (Anchor Utama M3)
+    -- Hierarki Salesman
     h.sd_id,
     h.sd_nm,
     h.nsm_id,
@@ -221,15 +233,15 @@ SELECT
     mgc.div_id,
     mgc.div_nm,
     
-    -- GRADE HANDLING LOGIC
+    -- GRADE HANDLING LOGIC (Bebas Duplikasi via cte_grading_store_fallback!)
     CASE 
-        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fallback.final_grade, 'UNGRADED / NO GRADE RECORD')
+        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fb.final_grade, 'UNGRADED / NO GRADE RECORD')
         ELSE NULL 
     END AS grade,
     
     act.kode_ap,
     CASE 
-        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.team_id, gst_fallback.team_id) 
+        WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.team_id, gst_fb.team_id) 
         ELSE NULL 
     END AS team_id,
     
@@ -257,12 +269,12 @@ SELECT
 
 FROM item_activity act
 
--- LEFT JOIN HIERARKI M3 (Gunakan Anchor)
+-- LEFT JOIN HIERARKI M3
 LEFT JOIN cte_m3_hierarchy h 
     ON act.sls_id = h.sls_id  
    AND act.distributor_id = h.distributor_id
 
--- Header Grade Toko
+-- Header Grade Toko Utama (Matching Kunci Komplit)
 LEFT JOIN cte_grading_store gst
     ON act.distributor_id = gst.distributor_id
    AND act.outlet_id      = gst.outlet_id
@@ -271,11 +283,12 @@ LEFT JOIN cte_grading_store gst
    AND act.year           = gst.year
    AND act.week           = gst.week
 
-LEFT JOIN cte_grading_store gst_fallback
-    ON act.distributor_id = gst_fallback.distributor_id
-   AND act.outlet_id      = gst_fallback.outlet_id
-   AND act.year           = gst_fallback.year
-   AND act.week           = gst_fallback.week
+-- Header Grade Toko Fallback (Matching Kunci Unik Store + Week dari CTE Fallback Khusus)
+LEFT JOIN cte_grading_store_fallback gst_fb
+    ON act.distributor_id = gst_fb.distributor_id
+   AND act.outlet_id      = gst_fb.outlet_id
+   AND act.year           = gst_fb.year
+   AND act.week           = gst_fb.week
 
 -- Join Master Tables Lainnya
 LEFT JOIN raw_ficom_m3.m_distributor md 
