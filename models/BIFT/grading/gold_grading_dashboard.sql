@@ -21,7 +21,8 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL (LEFT JOIN: t_grading_ir sebagai Utama, Banding sebagai Override)
+-- 1. CTE GRADING STORE LEVEL 
+-- (t_grading_ir sebagai Utama, t_grading_banding sebagai Override/Koreksi dengan kuncian komplit)
 cte_grading_store AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
@@ -37,10 +38,11 @@ cte_grading_store AS (
     FROM raw_ficom_m3.t_grading_ir g
     LEFT JOIN raw_ficom_m3.t_grading_banding b
         ON g.distributor_id::varchar = b.distributor_id::varchar
-       AND g.sls_id::varchar = b.sls_id::varchar
-       AND g.outlet_id::varchar = b.outlet_id::varchar
-       AND g.visit_date = b.visit_date
-       AND g.kode_ap::varchar = b.kode_ap::varchar
+       AND g.outlet_id::varchar      = b.outlet_id::varchar
+       AND g.sls_id::varchar         = b.sls_id::varchar
+       AND g.kode_ap::varchar        = b.kode_ap::varchar
+       AND g.visit_date              = b.visit_date
+       AND COALESCE(g.team_id::varchar, '') = COALESCE(b.team_id::varchar, '')
     LEFT JOIN spx.m_cycle3 c ON g.visit_date::date = c.cdate::date
     WHERE g.visit_date >= '2025-01-01'
     GROUP BY 
@@ -51,7 +53,8 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY (LEFT JOIN: t_rcall_avis_d sebagai Utama, Banding sebagai Override)
+-- 2. CTE IR DISPLAY 
+-- (t_rcall_avis_d sebagai Utama AI, t_rcall_avis_manual sebagai Override Koreksi Facing)
 cte_avis_raw_joined AS (
     SELECT 
         a.distributor_id::varchar AS distributor_id,
@@ -60,15 +63,17 @@ cte_avis_raw_joined AS (
         a.kode_ap::varchar AS kode_ap,
         a.pcode::varchar AS pcode,
         a.visit_date AS visit_date,
+        COALESCE(a.team_id::varchar, '') AS team_id,
         COALESCE(m.count_facing::integer, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
     LEFT JOIN raw_ficom_m3.t_rcall_avis_manual m 
         ON a.distributor_id::varchar = m.distributor_id::varchar
-       AND a.outlet_id::varchar = m.outlet_id::varchar
-       AND a.sls_id::varchar = m.sls_id::varchar
-       AND a.kode_ap::varchar = m.kode_ap::varchar
-       AND a.pcode::varchar = m.pcode::varchar
-       AND a.visit_date = m.visit_date
+       AND a.outlet_id::varchar      = m.outlet_id::varchar
+       AND a.sls_id::varchar         = m.sls_id::varchar
+       AND a.kode_ap::varchar        = m.kode_ap::varchar
+       AND a.pcode::varchar          = m.pcode::varchar
+       AND a.visit_date              = m.visit_date
+       AND COALESCE(a.team_id::varchar, '') = COALESCE(m.team_id::varchar, '')
     WHERE a.visit_date >= '2025-01-01'
 ),
 
@@ -94,7 +99,7 @@ cte_avis_item AS (
         c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA
+-- 3. CTE TRANSAKSI SALES SFA (Granularitas Level Cycle Week)
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -119,7 +124,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY
+-- 4. KONSOLIDASI ITEM ACTIVITY (1 to 1 MATCHING PER STORE + PCODE + WEEK)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -140,10 +145,10 @@ item_activity AS (
     FROM cte_avis_item av
     FULL OUTER JOIN cte_sales_item s
         ON av.distributor_id = s.distributor_id
-       AND av.outlet_id = s.outlet_id
-       AND av.pcode = s.pcode
-       AND av.year = s.year
-       AND av.week = s.week
+       AND av.outlet_id     = s.outlet_id
+       AND av.pcode         = s.pcode
+       AND av.year          = s.year
+       AND av.week          = s.week
 )
 
 -- MAIN QUERY
@@ -152,7 +157,7 @@ SELECT
     act.period,
     act.week,
     
-    -- Hierarki Sales
+    -- Hierarki Salesman
     b.sd_id,
     b.sd_nm,
     b.nsm_id,
@@ -182,7 +187,7 @@ SELECT
     mgc.div_id,
     mgc.div_nm,
     
-    -- GRADE HANDLING
+    -- GRADE HANDLING LOGIC
     CASE 
         WHEN act.is_in_ir_table = 1 THEN COALESCE(gst.final_grade, gst_fallback.final_grade, 'UNGRADED / NO GRADE RECORD')
         ELSE NULL 
@@ -221,17 +226,17 @@ FROM item_activity act
 -- Header Grade Toko
 LEFT JOIN cte_grading_store gst
     ON act.distributor_id = gst.distributor_id
-   AND act.outlet_id = gst.outlet_id
-   AND act.sls_id = gst.sls_id
-   AND act.kode_ap = gst.kode_ap
-   AND act.year = gst.year
-   AND act.week = gst.week
+   AND act.outlet_id      = gst.outlet_id
+   AND act.sls_id         = gst.sls_id
+   AND act.kode_ap        = gst.kode_ap
+   AND act.year           = gst.year
+   AND act.week           = gst.week
 
 LEFT JOIN cte_grading_store gst_fallback
     ON act.distributor_id = gst_fallback.distributor_id
-   AND act.outlet_id = gst_fallback.outlet_id
-   AND act.year = gst_fallback.year
-   AND act.week = gst_fallback.week
+   AND act.outlet_id      = gst_fallback.outlet_id
+   AND act.year           = gst_fallback.year
+   AND act.week           = gst_fallback.week
 
 -- Join Master Tables
 LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
