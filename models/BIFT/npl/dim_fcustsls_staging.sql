@@ -15,98 +15,65 @@
     )
 }}
 
-WITH group_channel_staging AS (
-    SELECT DISTINCT ON (channel_id) 
-        *
-    FROM (
-        SELECT DISTINCT ON (channel_id) 
-            channel_id,
-            channel_nm,
-            group_channel_id,
-            group_channel_nm
-        FROM raw_ficom_m1.m_group_channels
-        UNION ALL
-        SELECT DISTINCT ON (channel_id) 
-            channel_id,
-            channel_nm,
-            group_channel_id,
-            group_channel_nm
-        FROM raw_ficom_m2.m_group_channels
-        UNION ALL
-        SELECT DISTINCT ON (channel_id) 
-            channel_id,
-            channel_nm,
-            group_channel_id,
-            group_channel_nm
-        FROM raw_ficom_m3.m_group_channels
-        ORDER BY channel_id ASC
-    ) AS a
-),
-combined_staging AS (
-    SELECT 
-        'm1' AS source_schema,
-        *
-    FROM raw_ficom_m1.v_fcustsls_staging
-    UNION ALL
-    SELECT 
-        'm2' AS source_schema,
-        *
-    FROM raw_ficom_m2.v_fcustsls_staging
-    UNION ALL
-    SELECT 
-        'm3' AS source_schema,
-        *
-    FROM raw_ficom_m3.v_fcustsls_staging
-),
-
-latest_staging_per_period AS (
-    SELECT DISTINCT ON (distributor_id, sls_id, cust_id, tahun, periode)
-        *
-    FROM combined_staging
-    WHERE cust_id IS NOT NULL
-      AND distributor_id IS NOT NULL
-      AND tahun IS NOT NULL
-      AND periode IS NOT NULL
-    ORDER BY 
-        distributor_id,
-        sls_id,
-        cust_id,
-        tahun,
-        periode,
-        upd_date DESC NULLS LAST,
-        _airbyte_extracted_at DESC NULLS LAST
-)
-
 SELECT 
-    l.*,
-    CASE 
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'YYYY' THEN 'Weekly'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'YTYT' THEN 'BiWeekly1'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TYTY' THEN 'BiWeekly2'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'YTTT' THEN 'Monthly1'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TYTT' THEN 'Monthly2'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TTYT' THEN 'Monthly3'
-        WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TTTY' THEN 'Monthly4'
-    END AS cycle_kunjungan,
+    dfs.source_schema,
+    dfs._airbyte_extracted_at,
+    dfs.distributor_id,
+    dfs.sls_id,
+    dfs.cust_id,
+    dfs.tahun,
+    dfs.periode,
+    dfs.channel_id,
     gc.channel_nm,
     gc.group_channel_id,
     gc.group_channel_nm,
+    dfs.flag_aktif,
+    dfs.group_outlet,
+    dfs.salesforce_id,
+    mmgs.gsalesforce_id,
+    mmgs.gsalesforce_nm,
+    mmgs.salesforce_nm,
+    dfs.team_id,
+    dfs.hrabu,
+    dfs.nobrs,
+    dfs.route,
+    dfs.hjumat,
+    dfs.hkamis,
+    dfs.hsabtu,
+    dfs.hsenin,
+    dfs.slimit,
+    dfs.visit1,
+    dfs.visit2,
+    dfs.visit3,
+    dfs.visit4,
+    dfs.cycle_kunjungan,
+    dfs.hminggu,
+    dfs.hselasa,
+
+    -- Customer & Location Details
     dc.cust_nm,
-    dc.address || dc.address2 AS address,
-    dc.provinsi,
-    dl.provinsi_name,
-    dc.kabupaten,
-    dl.kabupaten_name,
-    dc.kecamatan,
-    dl.kecamatan_name,
-    dc.kelurahan,
-    dl.kelurahan_name,
-    dc.contact_person
-FROM latest_staging_per_period l
-LEFT JOIN group_channel_staging gc
-       ON l.channel_id = gc.channel_id
-LEFT JOIN bift.dim_customer dc
-       ON dc.distributor_id = l.distributor_id
-      AND dc.cust_id        = l.cust_id
-LEFT JOIN bift.dim_lokasi dl
-       ON dl.kelurahan_code = dc.kelurahan
+    loc.provinsi_code,
+    loc.provinsi_name,
+    loc.kabupaten_code,
+    loc.kabupaten_name,
+    loc.kecamatan_code,
+    loc.kecamatan_name,
+    loc.kelurahan_code,
+    loc.kelurahan_name,
+    dc.latitude,
+    dc.longitude
+FROM {{ ref('stg_fcustsls') }} dfs
+INNER JOIN bift.dim_group_channel gc
+    ON dfs.channel_id = gc.channel_id
+LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
+    ON dfs.salesforce_id = mmgs.salesforce_id
+LEFT JOIN bift.dim_customer dc 
+    ON dc.distributor_id = dfs.distributor_id 
+   AND dc.cust_id = dfs.cust_id 
+LEFT JOIN bift.dim_lokasi loc
+    ON dc.provinsi = loc.provinsi_code
+   AND dc.kabupaten = loc.kabupaten_code
+   AND dc.kecamatan = loc.kecamatan_code
+   AND dc.kelurahan = loc.kelurahan_code
+WHERE dfs.flag_aktif = 'Y' 
+  AND dfs.salesforce_id NOT IN ('999', '116', '213', '222')

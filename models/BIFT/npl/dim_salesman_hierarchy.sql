@@ -15,58 +15,67 @@
 WITH combined_hierarchy AS (
     SELECT 
         'm1' AS source_schema,
-        sd_id,
-        sd_nm,
-        nsm_id,
-        nsm_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        distributor_id,
-        sls_id,
-        _airbyte_extracted_at
-    FROM raw_ficom_m1.v_salesman_hierarchy
+        h.sd_id,
+        h.sd_nm,
+        h.nsm_id,
+        h.nsm_nm,
+        h.grsm_id,
+        h.grsm_nm,
+        h.rsm_id,
+        h.rsm_nm,
+        h.ss_id,
+        h.ss_nm,
+        h.distributor_id,
+        h.sls_id,
+        h._airbyte_extracted_at
+    FROM raw_ficom_m1.v_salesman_hierarchy h
+    JOIN raw_ficom_m1.m_employee e
+      ON h.ss_id = e.emp_id
+     AND e.terminate_date IS NULL
 
     UNION ALL
 
     SELECT 
         'm2' AS source_schema,
-        sd_id,
-        sd_nm,
-        nsm_id,
-        nsm_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        distributor_id,
-        sls_id,
-        _airbyte_extracted_at
-    FROM raw_ficom_m2.v_salesman_hierarchy
+        h.sd_id,
+        h.sd_nm,
+        h.nsm_id,
+        h.nsm_nm,
+        h.grsm_id,
+        h.grsm_nm,
+        h.rsm_id,
+        h.rsm_nm,
+        h.ss_id,
+        h.ss_nm,
+        h.distributor_id,
+        h.sls_id,
+        h._airbyte_extracted_at
+    FROM raw_ficom_m2.v_salesman_hierarchy h
+    JOIN raw_ficom_m2.m_employee e
+      ON h.ss_id = e.emp_id
+     AND e.terminate_date IS NULL
 
     UNION ALL
 
     SELECT 
         'm3' AS source_schema,
-        sd_id,
-        sd_nm,
-        nsm_id,
-        nsm_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        distributor_id,
-        sls_id,
-        _airbyte_extracted_at
-    FROM raw_ficom_m3.v_salesman_hierarchy
+        h.sd_id,
+        h.sd_nm,
+        h.nsm_id,
+        h.nsm_nm,
+        h.grsm_id,
+        h.grsm_nm,
+        h.rsm_id,
+        h.rsm_nm,
+        h.ss_id,
+        h.ss_nm,
+        h.distributor_id,
+        h.sls_id,
+        h._airbyte_extracted_at
+    FROM raw_ficom_m3.v_salesman_hierarchy h
+    JOIN raw_ficom_m3.m_employee e
+      ON h.ss_id = e.emp_id
+     AND e.terminate_date IS NULL
 )
 SELECT 
     h.source_schema,
@@ -113,3 +122,4 @@ LEFT JOIN bift.dim_salesman sm
       AND h.sls_id        = sm.sls_id
 LEFT JOIN spx.m_distributor md
         ON md.distributor_id = h.distributor_id
+WHERE sm.salesforce_id NOT IN ('999', '116', '213', '222')
