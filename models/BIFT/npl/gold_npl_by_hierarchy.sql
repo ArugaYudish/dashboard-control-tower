@@ -2,7 +2,7 @@
     config(
         schema='bift',
         materialized='table',
-        alias='gold_npl_dashboard',
+        alias='gold_npl_by_hierarchy',
         pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
           {'columns': ['tahun', 'periode'], 'type': 'btree'},
