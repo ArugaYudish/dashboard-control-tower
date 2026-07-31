@@ -21,7 +21,20 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL
+-- 0. ANCHOR PALING KIRI: HIERARKI SALESMAN M3
+cte_m3_hierarchy AS (
+    SELECT DISTINCT
+        distributor_id::varchar AS distributor_id,
+        sls_id::varchar AS sls_id,
+        sd_id, sd_nm,
+        nsm_id, nsm_nm,
+        grsm_id, grsm_nm,
+        rsm_id, rsm_nm,
+        ss_id, ss_nm
+    FROM raw_ficom_m3.v_salesman_hierarchy
+),
+
+-- 1. CTE GRADING STORE LEVEL (Locked ke Salesman M3)
 cte_grading_store AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
@@ -35,6 +48,9 @@ cte_grading_store AS (
         MAX(COALESCE(b.team_id::varchar, g.team_id::varchar)) AS team_id,
         MAX(COALESCE(b.grade, g.grade)) AS final_grade
     FROM raw_ficom_m3.t_grading_ir g
+    INNER JOIN cte_m3_hierarchy h 
+        ON g.sls_id::varchar = h.sls_id 
+       AND g.distributor_id::varchar = h.distributor_id
     LEFT JOIN raw_ficom_m3.t_grading_banding b
         ON g.distributor_id::varchar = b.distributor_id::varchar
        AND g.outlet_id::varchar      = b.outlet_id::varchar
@@ -52,7 +68,7 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY (Agregasi Manual Dulu Biar Gak Bikin Duplikasi Row di Avis D)
+-- 2. CTE IR DISPLAY (Locked Hanya Salesman yang Ada di Hierarki M3)
 cte_manual_dedup AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
@@ -61,16 +77,10 @@ cte_manual_dedup AS (
         kode_ap::varchar AS kode_ap,
         pcode::varchar AS pcode,
         visit_date,
-        MAX(count_facing::integer) AS count_facing -- Ambil nilai facing manual terbesar jika ada multiple submission
+        MAX(count_facing::integer) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_manual
     WHERE visit_date >= '2025-01-01'
-    GROUP BY 
-        distributor_id::varchar,
-        outlet_id::varchar,
-        sls_id::varchar,
-        kode_ap::varchar,
-        pcode::varchar,
-        visit_date
+    GROUP BY 1, 2, 3, 4, 5, 6
 ),
 
 cte_avis_raw_joined AS (
@@ -81,9 +91,12 @@ cte_avis_raw_joined AS (
         a.kode_ap::varchar AS kode_ap,
         a.pcode::varchar AS pcode,
         a.visit_date AS visit_date,
-        -- Mengutamakan manual jika ada, kalau tidak ada pakai auto
         COALESCE(m.count_facing, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
+    -- Filter IR: Hanya ambil aktivitas salesman M3
+    INNER JOIN cte_m3_hierarchy h 
+        ON a.sls_id::varchar = h.sls_id 
+       AND a.distributor_id::varchar = h.distributor_id
     LEFT JOIN cte_manual_dedup m 
         ON a.distributor_id::varchar = m.distributor_id
        AND a.outlet_id::varchar      = m.outlet_id
@@ -116,7 +129,7 @@ cte_avis_item AS (
         c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA
+-- 3. CTE TRANSAKSI SALES SFA (Locked Hanya Salesman yang Ada di Hierarki M3)
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -131,6 +144,10 @@ cte_sales_item AS (
         SUM(COALESCE(s.inv_qty::numeric, 0)) AS total_inv_qty,
         SUM(COALESCE(s.inv_val::numeric, 0)) AS total_inv_val
     FROM raw_ho.vfsales_det s
+    -- Filter Sales: Hanya ambil transaksi salesman M3
+    INNER JOIN cte_m3_hierarchy h 
+        ON s.slsno::varchar = h.sls_id 
+       AND s.subdist_id::varchar = h.distributor_id
     LEFT JOIN spx.m_cycle3 c ON s.inv_date::date = c.cdate::date
     WHERE s.inv_date >= '2025-01-01'
       AND (COALESCE(s.inv_qty::numeric, 0) > 0 OR COALESCE(s.inv_val::numeric, 0) > 0)
@@ -141,7 +158,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY
+-- 4. KONSOLIDASI ITEM ACTIVITY (1-TO-1 MATCHING KHUSUS EKOSISTEM M3)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -174,17 +191,17 @@ SELECT
     act.period,
     act.week,
     
-    -- Hierarki Salesman
-    b.sd_id,
-    b.sd_nm,
-    b.nsm_id,
-    b.nsm_nm,
-    b.grsm_id,
-    b.grsm_nm,
-    b.rsm_id,
-    b.rsm_nm,
-    b.ss_id,
-    b.ss_nm,
+    -- Hierarki Salesman (Anchor Utama M3)
+    h.sd_id,
+    h.sd_nm,
+    h.nsm_id,
+    h.nsm_nm,
+    h.grsm_id,
+    h.grsm_nm,
+    h.rsm_id,
+    h.rsm_nm,
+    h.ss_id,
+    h.ss_nm,
     act.sls_id,
     act.distributor_id,
 
@@ -240,6 +257,11 @@ SELECT
 
 FROM item_activity act
 
+-- LEFT JOIN HIERARKI M3 (Gunakan Anchor)
+LEFT JOIN cte_m3_hierarchy h 
+    ON act.sls_id = h.sls_id  
+   AND act.distributor_id = h.distributor_id
+
 -- Header Grade Toko
 LEFT JOIN cte_grading_store gst
     ON act.distributor_id = gst.distributor_id
@@ -255,11 +277,7 @@ LEFT JOIN cte_grading_store gst_fallback
    AND act.year           = gst_fallback.year
    AND act.week           = gst_fallback.week
 
--- Join Master Tables
-LEFT JOIN raw_ficom_m3.v_salesman_hierarchy b 
-    ON act.sls_id = b.sls_id::varchar  
-   AND act.distributor_id = b.distributor_id::varchar
-
+-- Join Master Tables Lainnya
 LEFT JOIN raw_ficom_m3.m_distributor md 
     ON act.distributor_id = md.distributor_id::varchar
 
