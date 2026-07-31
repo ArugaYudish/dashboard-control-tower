@@ -113,7 +113,7 @@ SELECT
     -- 10. CB & Transaction Flags
     1                               AS is_cb,  -- always 1 since CB Cover is the driving table
     CASE
-        WHEN t.inv_no IS NOT NULL THEN 1
+        WHEN COALESCE(t.inv_val, 0) > 0 THEN 1
         ELSE 0
     END                             AS is_transaction
 
