@@ -21,8 +21,7 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. CTE GRADING STORE LEVEL 
--- (t_grading_ir sebagai Utama, t_grading_banding sebagai Override/Koreksi dengan kuncian komplit)
+-- 1. CTE GRADING STORE LEVEL
 cte_grading_store AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
@@ -53,8 +52,27 @@ cte_grading_store AS (
         c.year, c.period, c.week
 ),
 
--- 2. CTE IR DISPLAY 
--- (t_rcall_avis_d sebagai Utama AI, t_rcall_avis_manual sebagai Override Koreksi Facing)
+-- 2. CTE IR DISPLAY (Agregasi Manual Dulu Biar Gak Bikin Duplikasi Row di Avis D)
+cte_manual_dedup AS (
+    SELECT 
+        distributor_id::varchar AS distributor_id,
+        outlet_id::varchar AS outlet_id,
+        sls_id::varchar AS sls_id,
+        kode_ap::varchar AS kode_ap,
+        pcode::varchar AS pcode,
+        visit_date,
+        MAX(count_facing::integer) AS count_facing -- Ambil nilai facing manual terbesar jika ada multiple submission
+    FROM raw_ficom_m3.t_rcall_avis_manual
+    WHERE visit_date >= '2025-01-01'
+    GROUP BY 
+        distributor_id::varchar,
+        outlet_id::varchar,
+        sls_id::varchar,
+        kode_ap::varchar,
+        pcode::varchar,
+        visit_date
+),
+
 cte_avis_raw_joined AS (
     SELECT 
         a.distributor_id::varchar AS distributor_id,
@@ -63,14 +81,15 @@ cte_avis_raw_joined AS (
         a.kode_ap::varchar AS kode_ap,
         a.pcode::varchar AS pcode,
         a.visit_date AS visit_date,
-        COALESCE(m.count_facing::integer, a.count_facing::integer, 0) AS count_facing
+        -- Mengutamakan manual jika ada, kalau tidak ada pakai auto
+        COALESCE(m.count_facing, a.count_facing::integer, 0) AS count_facing
     FROM raw_ficom_m3.t_rcall_avis_d a
-    LEFT JOIN raw_ficom_m3.t_rcall_avis_manual m 
-        ON a.distributor_id::varchar = m.distributor_id::varchar
-       AND a.outlet_id::varchar      = m.outlet_id::varchar
-       AND a.sls_id::varchar         = m.sls_id::varchar
-       AND a.kode_ap::varchar        = m.kode_ap::varchar
-       AND a.pcode::varchar          = m.pcode::varchar
+    LEFT JOIN cte_manual_dedup m 
+        ON a.distributor_id::varchar = m.distributor_id
+       AND a.outlet_id::varchar      = m.outlet_id
+       AND a.sls_id::varchar         = m.sls_id
+       AND a.kode_ap::varchar        = m.kode_ap
+       AND a.pcode::varchar          = m.pcode
        AND a.visit_date              = m.visit_date
     WHERE a.visit_date >= '2025-01-01'
 ),
@@ -97,7 +116,7 @@ cte_avis_item AS (
         c.year, c.period, c.week
 ),
 
--- 3. CTE TRANSAKSI SALES SFA (Granularitas Level Cycle Week)
+-- 3. CTE TRANSAKSI SALES SFA
 cte_sales_item AS (
     SELECT 
         s.subdist_id::varchar AS distributor_id,
@@ -122,7 +141,7 @@ cte_sales_item AS (
         c.year, c.period, c.week
 ),
 
--- 4. KONSOLIDASI ITEM ACTIVITY (1 to 1 MATCHING PER STORE + PCODE + WEEK)
+-- 4. KONSOLIDASI ITEM ACTIVITY
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
