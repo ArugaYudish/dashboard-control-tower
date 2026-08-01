@@ -5,23 +5,18 @@
         alias='silver_npl_by_hierarchy',
         pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
-          -- Time Slicing
           {'columns': ['tahun', 'periode', 'week'], 'type': 'btree'},
           {'columns': ['date'], 'type': 'btree'},
 
-          -- Product Filters
           {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'subbrand_id'], 'type': 'btree'},
 
-          -- Salesforce Filters
           {'columns': ['tahun', 'periode', 'salesforce_id'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'gsalesforce_id'], 'type': 'btree'},
 
-          -- Channel Filters
           {'columns': ['tahun', 'periode', 'channel_id'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'group_channel_id'], 'type': 'btree'},
 
-          -- Hierarchy & Customer Lookups
           {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
           {'columns': ['sd_id', 'nsm_id', 'grsm_id', 'rsm_id', 'ss_id', 'distributor_id'], 'type': 'btree'},
           {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
