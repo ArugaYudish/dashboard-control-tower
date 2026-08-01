@@ -2,8 +2,8 @@
     config(
         schema='bift',
         materialized='table',
-        alias='silver_npl_by_hierarchy',
-        pre_hook="SET LOCAL work_mem = '512MB';",
+        alias='silver_npl_by_hierarchy_dev',
+        pre_hook="SET LOCAL work_mem = '256MB';",
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'},
@@ -12,18 +12,23 @@
     )
 }}
 
+-- DEV/TESTING ONLY: Filtered to tahun=2026, periode IN (4,5), distributor_id='103481'
+-- Do NOT use this model in production Gold pipelines.
+
 WITH 
--- STEP 0: Deduplicated week bridge (periode -> week mapping, no date fan-out)
+-- STEP 0: Deduplicated week bridge — filtered to only needed periods
 week_bridge AS (
     SELECT DISTINCT
         "year"::numeric     AS tahun,
         "period"::numeric   AS periode,
         week::numeric       AS week
     FROM spx.m_cycle3
+    WHERE "year"::numeric   = 2026
+      AND "period"::numeric IN (4, 5)
 ),
 
--- STEP 1: Enrich each transaction row (at inv_no + pcode grain) with tahun/periode/week
--- No grouping — every transaction line is preserved as-is
+-- STEP 1: Enrich each transaction row — filtered early to target distributor & periods
+-- Early filter on subdist_id + period cuts the raw scan from 50M+ rows to thousands
 trx_with_period AS (
     SELECT
         s.subdist_id                AS distributor_id,
@@ -37,7 +42,6 @@ trx_with_period AS (
         s.pcode,
         s.inv_qty,
         s.inv_val,
-        -- Product info joined early (before CB Cover fan-out) for performance
         f.pcode_nm,
         COALESCE(
             s.inv_qty::numeric / NULLIF(f.convunit2 * f.convunit3, 0),
@@ -57,14 +61,18 @@ trx_with_period AS (
         f.cat_nm,
         f.sbu_id,
         f.sbu_nm
-    FROM raw_ho.vfsales_det s
-    -- Bridge: map daily ord_date -> tahun/periode/week via m_cycle3
+    FROM (
+        SELECT *
+        FROM raw_ho.vfsales_det
+        WHERE sts        = '905'
+          AND subdist_id = '103481'                -- DEV filter: single distributor
+    ) s
     INNER JOIN spx.m_cycle3 c
             ON s.ord_date::date = c.cdate::date
-    -- Product lookup joined here (small dataset) instead of after 40G CB Cover fan-out
     LEFT JOIN bift.dim_product f
            ON s.pcode = f.pcode
-    WHERE s.sts = '905'
+    WHERE c."year"::numeric   = 2026               -- DEV filter: tahun
+      AND c."period"::numeric IN (4, 5)            -- DEV filter: periode
 )
 
 SELECT
@@ -73,7 +81,7 @@ SELECT
     cs.tahun,
     cs.periode,
 
-    -- 2. Date & Week (week is always populated from week_bridge; date is NULL if no transaction)
+    -- 2. Date & Week (week always populated from week_bridge; date NULL if no transaction)
     wb.week,
     t.date,
 
@@ -117,7 +125,7 @@ SELECT
     cs.cycle_kunjungan,
     cs.route,
 
-    -- 8. Location (from CB Cover — already enriched via dim_customer + dim_lokasi)
+    -- 8. Location
     cs.provinsi_code,
     cs.provinsi_name,
     cs.kabupaten_code,
@@ -129,7 +137,7 @@ SELECT
     cs.latitude,
     cs.longitude,
 
-    -- 9. Transaction Detail (NULL when no transaction in this period/week)
+    -- 9. Transaction Detail (NULL when no transaction this period/week)
     t.inv_no,
     t.pcode,
     t.pcode_nm,
@@ -159,18 +167,29 @@ SELECT
         ELSE 0
     END                             AS is_transaction
 
--- STEP A: CB Cover — outlets covered per tahun-periode
-FROM bift.dim_salesman_hierarchy sh
-INNER JOIN bift.dim_fcustsls_staging cs
+-- STEP A: CB Cover — subquery filtered to single distributor, SS & target periods
+FROM (
+    SELECT *
+    FROM bift.dim_fcustsls_staging
+    WHERE distributor_id = '103481'                -- DEV filter: single distributor
+      AND tahun          = 2026                    -- DEV filter: tahun
+      AND periode        IN (4, 5)                 -- DEV filter: periode
+) cs
+INNER JOIN (
+    SELECT *
+    FROM bift.dim_salesman_hierarchy
+    WHERE ss_id          = 'WF4045'                -- DEV filter: single SS
+      AND distributor_id = '103481'                -- DEV filter: single distributor
+) sh
         ON cs.distributor_id = sh.distributor_id
        AND cs.sls_id         = sh.sls_id
 
--- STEP B: Explode CB Cover per week in that period so every week has CB cover representation
+-- STEP B: Explode CB Cover per week — only weeks in filtered periods
 INNER JOIN week_bridge wb
         ON wb.tahun   = cs.tahun
        AND wb.periode = cs.periode
 
--- STEP C: Left join transaction rows matched via distributor, sls, cust, tahun, periode, AND week
+-- STEP C: Left join transactions matched at week precision
 LEFT JOIN trx_with_period t
        ON t.distributor_id   = cs.distributor_id
       AND t.sls_id           = cs.sls_id
@@ -178,5 +197,3 @@ LEFT JOIN trx_with_period t
       AND t.tahun            = cs.tahun
       AND t.periode          = cs.periode
       AND t.week             = wb.week
-
--- Product data is already resolved inside trx_with_period CTE (early join for performance)
