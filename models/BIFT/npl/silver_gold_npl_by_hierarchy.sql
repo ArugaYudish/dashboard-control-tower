@@ -2,25 +2,45 @@
     config(
         schema='bift',
         materialized='table',
-        alias='gold_npl_by_hierarchy',
+        alias='silver_gold_npl_by_hierarchy',
         pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
-          {'columns': ['tahun', 'periode'], 'type': 'btree'},
+          -- Time Slicing
+          {'columns': ['tahun', 'periode', 'week'], 'type': 'btree'},
           {'columns': ['date'], 'type': 'btree'},
 
-          {'columns': ['sd_id', 'nsm_id', 'rsm_id', 'ss_id', 'distributor_id'], 'type': 'btree'},
-          {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
+          -- Product Filters
+          {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'subbrand_id'], 'type': 'btree'},
 
-          {'columns': ['gsalesforce_id', 'salesforce_id'], 'type': 'btree'},
-          {'columns': ['group_channel_id', 'channel_id'], 'type': 'btree'},
+          -- Salesforce Filters
+          {'columns': ['tahun', 'periode', 'salesforce_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'gsalesforce_id'], 'type': 'btree'},
+
+          -- Channel Filters
+          {'columns': ['tahun', 'periode', 'channel_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'group_channel_id'], 'type': 'btree'},
+
+          -- Hierarchy & Customer Lookups
+          {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
+          {'columns': ['sd_id', 'nsm_id', 'grsm_id', 'rsm_id', 'ss_id', 'distributor_id'], 'type': 'btree'},
+          {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
           {'columns': ['provinsi_code', 'kabupaten_code'], 'type': 'btree'}
         ]
     )
 }}
 
 WITH 
+-- STEP 0: Deduplicated week bridge (periode -> week mapping, no date fan-out)
+week_bridge AS (
+    SELECT DISTINCT
+        "year"::numeric     AS tahun,
+        "period"::numeric   AS periode,
+        week::numeric       AS week
+    FROM spx.m_cycle3
+),
 
--- STEP 1: Enrich each transaction row (at inv_no + pcode grain) with tahun/periode
+-- STEP 1: Enrich each transaction row (at inv_no + pcode grain) with tahun/periode/week
 -- No grouping — every transaction line is preserved as-is
 trx_with_period AS (
     SELECT
@@ -56,7 +76,7 @@ trx_with_period AS (
         f.sbu_id,
         f.sbu_nm
     FROM raw_ho.vfsales_det s
-    -- Bridge: map daily ord_date -> tahun/periode via m_cycle3
+    -- Bridge: map daily ord_date -> tahun/periode/week via m_cycle3
     INNER JOIN spx.m_cycle3 c
             ON s.ord_date::date = c.cdate::date
     -- Product lookup joined here (small dataset) instead of after 40G CB Cover fan-out
@@ -71,8 +91,8 @@ SELECT
     cs.tahun,
     cs.periode,
 
-    -- 2. Date & Week (from transaction; NULL if no transaction)
-    t.week,
+    -- 2. Date & Week (week is always populated from week_bridge; date is NULL if no transaction)
+    wb.week,
     t.date,
 
     -- 3. Sales Hierarchy
@@ -94,10 +114,10 @@ SELECT
     -- 5. Salesman & Salesforce
     sh.sls_id,
     sh.sls_nm,
-    cs.salesforce_id,
-    cs.salesforce_nm,
-    cs.gsalesforce_id,
-    cs.gsalesforce_nm,
+    sh.salesforce_id,
+    sh.salesforce_nm,
+    sh.gsalesforce_id,
+    sh.gsalesforce_nm,
     sh.salesforce_div_id,
     sh.salesforce_div_nm,
     sh.team_id,
@@ -127,7 +147,7 @@ SELECT
     cs.latitude,
     cs.longitude,
 
-    -- 9. Transaction Detail (NULL when no transaction in this period)
+    -- 9. Transaction Detail (NULL when no transaction in this period/week)
     t.inv_no,
     t.pcode,
     t.pcode_nm,
@@ -151,8 +171,7 @@ SELECT
     t.sbu_id,
     t.sbu_nm,
 
-    -- 11. CB & Transaction Flags
-    1                               AS is_cb,  -- always 1 since CB Cover is the driving table
+    -- 11. Transaction Flag
     CASE
         WHEN COALESCE(t.inv_val, 0) > 0 THEN 1
         ELSE 0
@@ -164,13 +183,18 @@ INNER JOIN bift.dim_fcustsls_staging cs
         ON cs.distributor_id = sh.distributor_id
        AND cs.sls_id         = sh.sls_id
 
--- STEP B: Left join transaction rows (inv_no + pcode grain) matched via tahun-periode
---         Outlets with no transaction in this period remain as 1 row with NULL trx columns
+-- STEP B: Explode CB Cover per week in that period so every week has CB cover representation
+INNER JOIN week_bridge wb
+        ON wb.tahun   = cs.tahun
+       AND wb.periode = cs.periode
+
+-- STEP C: Left join transaction rows matched via distributor, sls, cust, tahun, periode, AND week
 LEFT JOIN trx_with_period t
        ON t.distributor_id   = cs.distributor_id
       AND t.sls_id           = cs.sls_id
       AND t.cust_id          = cs.cust_id
       AND t.tahun            = cs.tahun
       AND t.periode          = cs.periode
+      AND t.week             = wb.week
 
 -- Product data is already resolved inside trx_with_period CTE (early join for performance)
