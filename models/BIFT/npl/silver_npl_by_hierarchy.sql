@@ -2,7 +2,7 @@
     config(
         schema='bift',
         materialized='table',
-        alias='silver_gold_npl_by_hierarchy',
+        alias='silver_npl_by_hierarchy',
         pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
           -- Time Slicing
