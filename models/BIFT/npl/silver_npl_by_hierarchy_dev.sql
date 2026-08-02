@@ -65,7 +65,7 @@ trx_with_period AS (
         SELECT *
         FROM raw_ho.vfsales_det
         WHERE sts        = '905'
-          AND subdist_id = '103481'                -- DEV filter: single distributor
+        --   AND subdist_id = '103481'                -- DEV filter: single distributor
     ) s
     INNER JOIN spx.m_cycle3 c
             ON s.ord_date::date = c.cdate::date
