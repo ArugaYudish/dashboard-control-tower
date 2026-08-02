@@ -171,15 +171,13 @@ SELECT
 FROM (
     SELECT *
     FROM bift.dim_fcustsls_staging
-    WHERE distributor_id = '103481'                -- DEV filter: single distributor
-      AND tahun          = 2026                    -- DEV filter: tahun
+    WHERE tahun          = 2026                    -- DEV filter: tahun
       AND periode        IN (4, 5)                 -- DEV filter: periode
 ) cs
 INNER JOIN (
     SELECT *
     FROM bift.dim_salesman_hierarchy
-    WHERE ss_id          = 'WF4045'                -- DEV filter: single SS
-      AND distributor_id = '103481'                -- DEV filter: single distributor
+    WHERE sd_id = 'WF0221'
 ) sh
         ON cs.distributor_id = sh.distributor_id
        AND cs.sls_id         = sh.sls_id

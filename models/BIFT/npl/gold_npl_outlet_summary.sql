@@ -5,22 +5,20 @@
         alias='gold_npl_outlet_summary',
         pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
-          {'columns': ['tahun', 'periode'], 'type': 'btree'},
-          {'columns': ['distributor_id'], 'type': 'btree'},
-          {'columns': ['cust_id'], 'type': 'btree'},
-          {'columns': ['pcode'], 'type': 'btree'},
-          {'columns': ['subbrand_id'], 'type': 'btree'},
-          {'columns': ['salesforce_id'], 'type': 'btree'},
-          {'columns': ['channel_id'], 'type': 'btree'}
+          {'columns': ['tahun', 'periode', 'week', 'distributor_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
+          {'columns': ['distributor_id', 'cust_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'}
         ]
     )
 }}
 
--- Unified single Gold table at Outlet + Product grain per period
+-- Unified single Gold table at Outlet + Product + Week grain
 
 SELECT
     tahun,
     periode,
+    week,
 
     -- Sales Hierarchy
     sd_id,
@@ -60,22 +58,16 @@ SELECT
     subbrand_id,
     subbrand_nm,
 
-    -- Pre-aggregated metrics at Outlet + Product grain per period
+    -- Pre-aggregated metrics at Outlet + Product + Week grain
     COUNT(DISTINCT inv_no)                                          AS order_count,
     SUM(COALESCE(qty_carton, 0))                                    AS qty_carton,
-
-    -- Pre-pivoted weekly omset
-    SUM(CASE WHEN week = 1 THEN COALESCE(inv_val, 0) ELSE 0 END)    AS omset_w1,
-    SUM(CASE WHEN week = 2 THEN COALESCE(inv_val, 0) ELSE 0 END)    AS omset_w2,
-    SUM(CASE WHEN week = 3 THEN COALESCE(inv_val, 0) ELSE 0 END)    AS omset_w3,
-    SUM(CASE WHEN week = 4 THEN COALESCE(inv_val, 0) ELSE 0 END)    AS omset_w4,
-    SUM(CASE WHEN week = 5 THEN COALESCE(inv_val, 0) ELSE 0 END)    AS omset_w5,
-    SUM(COALESCE(inv_val, 0))                                       AS total_omset
+    SUM(COALESCE(inv_val, 0))                                       AS inv_val
 
 FROM {{ ref('silver_npl_by_hierarchy') }}
 GROUP BY
     tahun,
     periode,
+    week,
     sd_id,
     sd_nm,
     nsm_id,
