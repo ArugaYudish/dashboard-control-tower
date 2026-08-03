@@ -18,6 +18,7 @@ WITH
 -- STEP 1: All valid CB Cover outlets for the period (1 row per cust_id per period)
 cb_cover AS (
     SELECT
+        cs.source_schema,
         cs.tahun,
         cs.periode,
         cs.distributor_id,
@@ -98,6 +99,7 @@ trx AS (
 -- STEP 3A: Output ALL real transaction rows (with exact week & transaction detail)
 trx_rows AS (
     SELECT
+        cb.source_schema,
         cb.tahun,
         cb.periode,
         trx.week,
@@ -137,6 +139,7 @@ trx_rows AS (
 -- STEP 3B: Output 1 row per NON-PURCHASING outlet per period (No 5-week dummy duplication!)
 non_purchasing_rows AS (
     SELECT
+        cb.source_schema,
         cb.tahun,
         cb.periode,
         NULL::numeric               AS week,

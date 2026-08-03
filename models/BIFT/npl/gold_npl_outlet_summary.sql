@@ -25,6 +25,7 @@ WITH week_bridge AS (
 
 -- STREAM A: Non-purchasing CB Outlets from Silver (1 row per outlet x week)
 SELECT
+    s.source_schema,
     s.tahun,
     s.periode,
     wb.week,
@@ -79,6 +80,7 @@ INNER JOIN week_bridge wb
        AND wb.periode = s.periode
 WHERE s.is_transaction = 0
 GROUP BY
+    s.source_schema,
     s.tahun,
     s.periode,
     wb.week,
@@ -111,6 +113,7 @@ UNION ALL
 
 -- STREAM B: Real Transaction Rows from Silver (Aggregated per outlet + pcode + week)
 SELECT
+    t.source_schema,
     t.tahun,
     t.periode,
     t.week,
@@ -162,6 +165,7 @@ SELECT
 FROM {{ ref('silver_npl_by_hierarchy') }} t
 WHERE t.is_transaction = 1
 GROUP BY
+    t.source_schema,
     t.tahun,
     t.periode,
     t.week,
