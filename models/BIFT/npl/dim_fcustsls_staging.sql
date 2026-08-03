@@ -30,8 +30,10 @@ SELECT
     dfs.flag_aktif,
     dfs.group_outlet,
     dfs.salesforce_id,
-    mmgs.gsalesforce_id,
-    mmgs.gsalesforce_nm,
+    mmgs.gsalesforce1_id,
+    mmgs.gsalesforce1_nm,
+    mmgs.gsalesforce2_id,
+    mmgs.gsalesforce2_nm,
     mmgs.salesforce_nm,
     dfs.team_id,
     dfs.hrabu,
@@ -67,6 +69,7 @@ INNER JOIN bift.dim_group_channel gc
     ON dfs.channel_id = gc.channel_id
 LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
+   AND dfs.source_schema = mmgs.source_schema
 LEFT JOIN bift.dim_customer dc 
     ON dc.distributor_id = dfs.distributor_id 
    AND dc.cust_id = dfs.cust_id 

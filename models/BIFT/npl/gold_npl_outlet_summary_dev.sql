@@ -13,84 +13,185 @@
     )
 }}
 
--- DEV/TESTING ONLY: Unified single Gold table at Outlet + Product + Week grain
+-- DEV/TESTING ONLY: Unified Gold table built 100% from Silver Dev Fact
 
+WITH week_bridge AS (
+    SELECT DISTINCT
+        "year"::numeric     AS tahun,
+        "period"::numeric   AS periode,
+        week::numeric       AS week
+    FROM spx.m_cycle3
+    WHERE "year"::numeric   = 2026
+      AND "period"::numeric IN (4, 5)
+)
+
+-- STREAM A: Non-purchasing CB Outlets from Silver (1 row per outlet x week)
 SELECT
-    tahun,
-    periode,
-    week,
+    s.tahun,
+    s.periode,
+    wb.week,
 
     -- Sales Hierarchy
-    sd_id,
-    sd_nm,
-    nsm_id,
-    nsm_nm,
-    grsm_id,
-    grsm_nm,
-    rsm_id,
-    rsm_nm,
-    ss_id,
-    ss_nm,
+    s.sd_id,
+    s.sd_nm,
+    s.nsm_id,
+    s.nsm_nm,
+    s.grsm_id,
+    s.grsm_nm,
+    s.rsm_id,
+    s.rsm_nm,
+    s.ss_id,
+    s.ss_nm,
 
     -- Distributor
-    distributor_id,
-    distributor_nm,
+    s.distributor_id,
+    s.distributor_nm,
 
     -- Salesforce
-    salesforce_id,
-    salesforce_nm,
-    gsalesforce_id,
-    gsalesforce_nm,
+    s.salesforce_id,
+    s.salesforce_nm,
+    s.gsalesforce1_id,
+    s.gsalesforce1_nm,
+    s.gsalesforce2_id,
+    s.gsalesforce2_nm,
 
     -- Channel
-    group_channel_id,
-    group_channel_nm,
-    channel_id,
-    channel_nm,
+    s.group_channel_id,
+    s.group_channel_nm,
+    s.channel_id,
+    s.channel_nm,
 
     -- Customer / Outlet
-    cust_id,
-    cust_nm,
+    s.cust_id,
+    s.cust_nm,
+
+    -- Product Placeholder
+    'ALL' AS pcode,
+    'ALL Products' AS pcode_nm,
+    'ALL' AS subbrand_id,
+    'ALL Subbrands' AS subbrand_nm,
+
+    0 AS order_count,
+    0 AS qty_carton,
+    0 AS inv_val
+
+FROM bift.silver_npl_by_hierarchy_dev s
+INNER JOIN week_bridge wb
+        ON wb.tahun   = s.tahun
+       AND wb.periode = s.periode
+WHERE s.is_transaction = 0
+GROUP BY
+    s.tahun,
+    s.periode,
+    wb.week,
+    s.sd_id,
+    s.sd_nm,
+    s.nsm_id,
+    s.nsm_nm,
+    s.grsm_id,
+    s.grsm_nm,
+    s.rsm_id,
+    s.rsm_nm,
+    s.ss_id,
+    s.ss_nm,
+    s.distributor_id,
+    s.distributor_nm,
+    s.salesforce_id,
+    s.salesforce_nm,
+    s.gsalesforce1_id,
+    s.gsalesforce1_nm,
+    s.gsalesforce2_id,
+    s.gsalesforce2_nm,
+    s.group_channel_id,
+    s.group_channel_nm,
+    s.channel_id,
+    s.channel_nm,
+    s.cust_id,
+    s.cust_nm
+
+UNION ALL
+
+-- STREAM B: Real Transaction Rows from Silver (Aggregated per outlet + pcode + week)
+SELECT
+    t.tahun,
+    t.periode,
+    t.week,
+
+    -- Sales Hierarchy
+    t.sd_id,
+    t.sd_nm,
+    t.nsm_id,
+    t.nsm_nm,
+    t.grsm_id,
+    t.grsm_nm,
+    t.rsm_id,
+    t.rsm_nm,
+    t.ss_id,
+    t.ss_nm,
+
+    -- Distributor
+    t.distributor_id,
+    t.distributor_nm,
+
+    -- Salesforce
+    t.salesforce_id,
+    t.salesforce_nm,
+    t.gsalesforce1_id,
+    t.gsalesforce1_nm,
+    t.gsalesforce2_id,
+    t.gsalesforce2_nm,
+
+    -- Channel
+    t.group_channel_id,
+    t.group_channel_nm,
+    t.channel_id,
+    t.channel_nm,
+
+    -- Customer / Outlet
+    t.cust_id,
+    t.cust_nm,
 
     -- Product
-    pcode,
-    pcode_nm,
-    subbrand_id,
-    subbrand_nm,
+    t.pcode,
+    t.pcode_nm,
+    t.subbrand_id,
+    t.subbrand_nm,
 
-    -- Pre-aggregated metrics at Outlet + Product + Week grain
-    COUNT(DISTINCT inv_no)                                          AS order_count,
-    SUM(COALESCE(qty_carton, 0))                                    AS qty_carton,
-    SUM(COALESCE(inv_val, 0))                                       AS inv_val
+    COUNT(DISTINCT t.inv_no)                                          AS order_count,
+    SUM(COALESCE(t.qty_carton, 0))                                    AS qty_carton,
+    SUM(COALESCE(t.inv_val, 0))                                       AS inv_val
 
-FROM bift.silver_npl_by_hierarchy_dev
+FROM bift.silver_npl_by_hierarchy_dev t
+WHERE t.is_transaction = 1
 GROUP BY
-    tahun,
-    periode,
-    week,
-    sd_id,
-    sd_nm,
-    nsm_id,
-    nsm_nm,
-    grsm_id,
-    grsm_nm,
-    rsm_id,
-    rsm_nm,
-    ss_id,
-    ss_nm,
-    distributor_id,
-    distributor_nm,
-    salesforce_id,
-    salesforce_nm,
-    gsalesforce_id,
-    gsalesforce_nm,
-    group_channel_id,
-    group_channel_nm,
-    channel_id,
-    channel_nm,
-    cust_id,
-    cust_nm,
-    pcode,
-    pcode_nm,
-    subbrand_id,
-    subbrand_nm
+    t.tahun,
+    t.periode,
+    t.week,
+    t.sd_id,
+    t.sd_nm,
+    t.nsm_id,
+    t.nsm_nm,
+    t.grsm_id,
+    t.grsm_nm,
+    t.rsm_id,
+    t.rsm_nm,
+    t.ss_id,
+    t.ss_nm,
+    t.distributor_id,
+    t.distributor_nm,
+    t.salesforce_id,
+    t.salesforce_nm,
+    t.gsalesforce1_id,
+    t.gsalesforce1_nm,
+    t.gsalesforce2_id,
+    t.gsalesforce2_nm,
+    t.group_channel_id,
+    t.group_channel_nm,
+    t.channel_id,
+    t.channel_nm,
+    t.cust_id,
+    t.cust_nm,
+    t.pcode,
+    t.pcode_nm,
+    t.subbrand_id,
+    t.subbrand_nm
