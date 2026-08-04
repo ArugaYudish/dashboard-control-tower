@@ -54,7 +54,7 @@ cb_cover AS (
     INNER JOIN (
         SELECT *
         FROM bift.dim_salesman_hierarchy
-        WHERE sd_id = 'WF0221'
+        WHERE sd_id = 'WF0220'
     ) sh
             ON cs.distributor_id = sh.distributor_id
            AND cs.sls_id         = sh.sls_id
