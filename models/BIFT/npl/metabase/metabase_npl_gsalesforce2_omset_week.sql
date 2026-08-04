@@ -36,10 +36,14 @@ WITH outlet_orders AS (
     FROM bift.gold_npl_by_gsalesforce2_dev
     WHERE 1=1
       [[ AND tahun = {{tahun}}::numeric ]]
+      [[ AND periode BETWEEN COALESCE(NULLIF('{{periodFrom}}', ''), '1')::numeric AND COALESCE(NULLIF('{{periodTo}}', ''), '13')::numeric ]]
       [[ AND week BETWEEN COALESCE(NULLIF('{{weekFrom}}', ''), '1')::numeric AND COALESCE(NULLIF('{{weekTo}}', ''), '53')::numeric ]]
-      [[ AND distributor_id IN ({{distributor_ids}}) ]]
+      [[ AND sd_id IN ({{sd_ids}}) ]]
+      [[ AND nsm_id IN ({{nsm_ids}}) ]]
+      [[ AND grsm_id IN ({{grsm_ids}}) ]]
       [[ AND rsm_id IN ({{rsm_ids}}) ]]
       [[ AND ss_id IN ({{ss_ids}}) ]]
+      [[ AND distributor_id IN ({{distributor_ids}}) ]]
       [[ AND gsalesforce2_id IN ({{gsalesforce2_ids}}) ]]
 
     GROUP BY ss_id, distributor_id, gsalesforce2_id, gsalesforce2_nm, week

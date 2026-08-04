@@ -36,10 +36,14 @@ WITH outlet_orders AS (
     FROM bift.gold_npl_by_group_channel_dev
     WHERE 1=1
       [[ AND tahun = {{tahun}}::numeric ]]
+      [[ AND periode BETWEEN COALESCE(NULLIF('{{periodFrom}}', ''), '1')::numeric AND COALESCE(NULLIF('{{periodTo}}', ''), '13')::numeric ]]
       [[ AND week BETWEEN COALESCE(NULLIF('{{weekFrom}}', ''), '1')::numeric AND COALESCE(NULLIF('{{weekTo}}', ''), '53')::numeric ]]
-      [[ AND distributor_id IN ({{distributor_ids}}) ]]
+      [[ AND sd_id IN ({{sd_ids}}) ]]
+      [[ AND nsm_id IN ({{nsm_ids}}) ]]
+      [[ AND grsm_id IN ({{grsm_ids}}) ]]
       [[ AND rsm_id IN ({{rsm_ids}}) ]]
       [[ AND ss_id IN ({{ss_ids}}) ]]
+      [[ AND distributor_id IN ({{distributor_ids}}) ]]
       [[ AND group_channel_id IN ({{group_channel_ids}}) ]]
 
     GROUP BY ss_id, distributor_id, group_channel_id, group_channel_nm, week
