@@ -59,8 +59,8 @@ SELECT
         WHEN classification_id IS NOT NULL 
         THEN CONCAT(classification_id, ' - ', classification_nm)
         ELSE NULL 
-    END                                                                 AS break_by_classification,
-    week,
+    END                                                                 AS "Break By",
+    week  AS "Week",
 
     -- Weekly Omset
     SUM(week_omset)                                                     AS omset

@@ -24,6 +24,18 @@ WITH week_bridge AS (
     FROM spx.m_cycle3
     WHERE "year"::numeric   = 2026
       AND "period"::numeric IN (4, 5)
+),
+
+silver_non_tx AS (
+    SELECT *
+    FROM bift.silver_npl_by_hierarchy_dev
+    WHERE is_transaction = 0
+),
+
+silver_tx AS (
+    SELECT *
+    FROM bift.silver_npl_by_hierarchy_dev
+    WHERE is_transaction = 1
 )
 
 -- STREAM A: Non-purchasing CB Outlets from Silver (1 row per outlet x week x classification)
@@ -58,16 +70,16 @@ SELECT
     s.cust_nm,
 
     -- Product Placeholder
-    'ALL'                                                             AS pcode,
-    'ALL Products'                                                    AS pcode_nm,
-    'ALL'                                                             AS subbrand_id,
-    'ALL Subbrands'                                                   AS subbrand_nm,
+    'N/A'                                                             AS pcode,
+    'N/A'                                                    AS pcode_nm,
+    'N/A'                                                             AS subbrand_id,
+    'N/A'                                                   AS subbrand_nm,
 
     0                                                                 AS order_count,
     0                                                                 AS qty_carton,
     0                                                                 AS inv_val
 
-FROM bift.silver_npl_by_hierarchy_dev s
+FROM silver_non_tx s
 INNER JOIN week_bridge wb
         ON wb.tahun   = s.tahun
        AND wb.periode = s.periode
@@ -76,7 +88,6 @@ LEFT JOIN raw_ficom_m2.m_channel_classifications cc
       AND s.source_schema = 'm2'
 LEFT JOIN bift.dim_classifications dc
        ON cc.classification_id = dc.classification_id
-WHERE s.is_transaction = 0
 GROUP BY
     s.source_schema,
     s.tahun,
@@ -142,13 +153,13 @@ SELECT
     SUM(COALESCE(t.qty_carton, 0))                                    AS qty_carton,
     SUM(COALESCE(t.inv_val, 0))                                       AS inv_val
 
-FROM bift.silver_npl_by_hierarchy_dev t
+FROM silver_tx t
 LEFT JOIN raw_ficom_m2.m_channel_classifications cc
        ON t.channel_id = cc.channel_id
       AND t.source_schema = 'm2'
 LEFT JOIN bift.dim_classifications dc
        ON cc.classification_id = dc.classification_id
-WHERE t.is_transaction = 1
+
 GROUP BY
     t.source_schema,
     t.tahun,

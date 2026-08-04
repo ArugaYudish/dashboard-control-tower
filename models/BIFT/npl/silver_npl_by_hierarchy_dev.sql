@@ -60,6 +60,13 @@ cb_cover AS (
            AND cs.sls_id         = sh.sls_id
 ),
 
+vfsales_filtered AS (
+    SELECT *
+    FROM raw_ho.vfsales_det
+    WHERE sts         = '905'
+      AND subdist_id  = '103481'                -- DEV filter: single distributor
+),
+
 -- STEP 2: Enriched transaction rows (resolved date & week from spx.m_cycle3)
 trx AS (
     SELECT
@@ -85,16 +92,15 @@ trx AS (
         f.class_team_id, f.class_team_nm,
         f.subbrand_id, f.subbrand_nm,
         f.cat_id, f.cat_nm, f.sbu_id, f.sbu_nm
-    FROM raw_ho.vfsales_det s
+    FROM vfsales_filtered s
     INNER JOIN spx.m_cycle3 c
             ON s.ord_date::date = c.cdate::date
     LEFT JOIN bift.dim_product f
            ON s.pcode = f.pcode
-    WHERE s.sts               = '905'
-      AND c."year"::numeric   = 2026
+    WHERE c."year"::numeric   = 2026
       AND c."period"::numeric IN (4, 5)
-      AND s.subdist_id        = '103481'                -- DEV filter: single distributor
 ),
+
 
 -- STEP 3A: Output ALL real transaction rows (with exact week & transaction detail)
 trx_rows AS (

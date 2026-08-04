@@ -70,42 +70,42 @@ SELECT
         WHEN gsalesforce1_id IS NOT NULL 
         THEN CONCAT(gsalesforce1_id, ' - ', gsalesforce1_nm)
         ELSE NULL 
-    END                                                                 AS break_by_gsalesforce1,
+    END                                                                 AS "Break By",
 
     -- 1. CB Cover (Exact count of covered outlets for selected week range)
-    COUNT(DISTINCT cust_id)                                             AS cb_cover,
+    COUNT(DISTINCT cust_id)                                             AS "CB Cover",
 
     -- 2. OA (Active outlets for selected products in selected week range)
-    COUNT(DISTINCT CASE WHEN pcode_order_count >= 1 THEN cust_id END)   AS oa,
+    COUNT(DISTINCT CASE WHEN pcode_order_count >= 1 THEN cust_id END)   AS "OA",
 
     -- 3. %OA = (OA / CB Cover) * 100
     ROUND(
         (COUNT(DISTINCT CASE WHEN pcode_order_count >= 1 THEN cust_id END)::numeric 
          / NULLIF(COUNT(DISTINCT cust_id), 0)) * 100, 
         2
-    )                                                                   AS oa_percent,
+    )                                                                   AS "%OA",
 
     -- 4. Total Dropsize (Carton Qty / OA)
     ROUND(
         SUM(pcode_qty_carton)::numeric 
         / NULLIF(COUNT(DISTINCT CASE WHEN pcode_order_count >= 1 THEN cust_id END), 0), 
         2
-    )                                                                   AS total_dropsize,
+    )                                                                   AS "Total Dropsize",
 
     -- 5–10. Deduplicated Repeat Order Buckets
-    COUNT(DISTINCT CASE WHEN pcode_order_count = 1  THEN cust_id END)   AS non_repeat,
-    COUNT(DISTINCT CASE WHEN pcode_order_count = 2  THEN cust_id END)   AS t2,
-    COUNT(DISTINCT CASE WHEN pcode_order_count = 3  THEN cust_id END)   AS t3,
-    COUNT(DISTINCT CASE WHEN pcode_order_count = 4  THEN cust_id END)   AS t4,
-    COUNT(DISTINCT CASE WHEN pcode_order_count = 5  THEN cust_id END)   AS t5,
-    COUNT(DISTINCT CASE WHEN pcode_order_count >= 6 THEN cust_id END)   AS t6,
+    COUNT(DISTINCT CASE WHEN pcode_order_count = 1  THEN cust_id END)   AS "Non Repeat",
+    COUNT(DISTINCT CASE WHEN pcode_order_count = 2  THEN cust_id END)   AS "T2",
+    COUNT(DISTINCT CASE WHEN pcode_order_count = 3  THEN cust_id END)   AS "T3",
+    COUNT(DISTINCT CASE WHEN pcode_order_count = 4  THEN cust_id END)   AS "T4",
+    COUNT(DISTINCT CASE WHEN pcode_order_count = 5  THEN cust_id END)   AS "T5",
+    COUNT(DISTINCT CASE WHEN pcode_order_count >= 6 THEN cust_id END)   AS "T6",
 
     -- 11. % Repeat = ((T2 + T3 + T4 + T5 + T6) / OA) * 100
     ROUND(
         (COUNT(DISTINCT CASE WHEN pcode_order_count >= 2 THEN cust_id END)::numeric 
          / NULLIF(COUNT(DISTINCT CASE WHEN pcode_order_count >= 1 THEN cust_id END), 0)) * 100, 
         2
-    )                                                                   AS percent_repeat
+    )                                                                   AS "%Repeat"
 
 FROM outlet_orders
 GROUP BY ss_id, distributor_id, gsalesforce1_id, gsalesforce1_nm

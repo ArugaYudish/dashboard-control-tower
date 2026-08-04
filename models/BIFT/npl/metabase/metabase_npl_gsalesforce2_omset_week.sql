@@ -59,8 +59,8 @@ SELECT
         WHEN gsalesforce2_id IS NOT NULL 
         THEN CONCAT(gsalesforce2_id, ' - ', gsalesforce2_nm)
         ELSE NULL 
-    END                                                                 AS break_by_gsalesforce2,
-    week,
+    END                                                                 AS "Break By",
+    week  AS "Week",
 
     -- Weekly Omset
     SUM(week_omset)                                                     AS omset

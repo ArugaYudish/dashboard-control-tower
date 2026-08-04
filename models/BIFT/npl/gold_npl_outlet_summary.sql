@@ -21,6 +21,18 @@ WITH week_bridge AS (
         "period"::numeric   AS periode,
         week::numeric       AS week
     FROM spx.m_cycle3
+),
+
+silver_non_tx AS (
+    SELECT *
+    FROM {{ ref('silver_npl_by_hierarchy') }}
+    WHERE is_transaction = 0
+),
+
+silver_tx AS (
+    SELECT *
+    FROM {{ ref('silver_npl_by_hierarchy') }}
+    WHERE is_transaction = 1
 )
 
 -- STREAM A: Non-purchasing CB Outlets from Silver (1 row per outlet x week)
@@ -65,20 +77,19 @@ SELECT
     s.cust_nm,
 
     -- Product Placeholder
-    'ALL' AS pcode,
-    'ALL Products' AS pcode_nm,
-    'ALL' AS subbrand_id,
-    'ALL Subbrands' AS subbrand_nm,
+    'N/A' AS pcode,
+    'N/A' AS pcode_nm,
+    'N/A' AS subbrand_id,
+    'N/A' AS subbrand_nm,
 
     0 AS order_count,
     0 AS qty_carton,
     0 AS inv_val
 
-FROM {{ ref('silver_npl_by_hierarchy') }} s
+FROM silver_non_tx s
 INNER JOIN week_bridge wb
         ON wb.tahun   = s.tahun
        AND wb.periode = s.periode
-WHERE s.is_transaction = 0
 GROUP BY
     s.source_schema,
     s.tahun,
@@ -162,8 +173,8 @@ SELECT
     SUM(COALESCE(t.qty_carton, 0))                                    AS qty_carton,
     SUM(COALESCE(t.inv_val, 0))                                       AS inv_val
 
-FROM {{ ref('silver_npl_by_hierarchy') }} t
-WHERE t.is_transaction = 1
+FROM silver_tx t
+
 GROUP BY
     t.source_schema,
     t.tahun,

@@ -59,8 +59,8 @@ SELECT
         WHEN group_channel_id IS NOT NULL 
         THEN CONCAT(group_channel_id, ' - ', group_channel_nm)
         ELSE NULL 
-    END                                                                 AS break_by_group_channel,
-    week,
+    END                                                                 AS "Break By",
+    week  AS "Week",
 
     -- Weekly Omset
     SUM(week_omset)                                                     AS omset

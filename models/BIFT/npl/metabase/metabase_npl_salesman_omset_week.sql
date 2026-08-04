@@ -59,8 +59,8 @@ SELECT
         WHEN sls_id IS NOT NULL 
         THEN CONCAT(sls_id, ' - ', sls_nm)
         ELSE NULL 
-    END                                                                 AS break_by_salesman,
-    week,
+    END                                                                 AS "Break By",
+    week  AS "Week",
 
     -- Weekly Omset
     SUM(week_omset)                                                     AS omset
