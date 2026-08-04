@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: raw_ho_mdm
+    schema: raw_ho
+    description: "HO Master Data loaded by Airbyte"
+    tables:
+      - name: fcshir11
+        description: "Raw provinsi data"
+      - name: fcshir12
+        description: "Raw kabupaten data"
+      - name: fcshir13
+        description: "Raw kecamatan data"
+      - name: fcshir14
+        description: "Raw kelurahan data"

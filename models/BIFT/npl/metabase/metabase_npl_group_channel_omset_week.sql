@@ -63,7 +63,7 @@ SELECT
     week  AS "Week",
 
     -- Weekly Omset
-    SUM(week_omset)                                                     AS omset
+    SUM(week_omset)                                                     AS "Omset"
 
 FROM outlet_orders
 GROUP BY ss_id, distributor_id, group_channel_id, group_channel_nm, week
