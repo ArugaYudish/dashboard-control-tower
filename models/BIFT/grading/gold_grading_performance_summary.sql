@@ -34,17 +34,16 @@ cte_cb_snapshot AS (
         st.cust_id,
         st.upd_date,
         
-        -- 🔥 REVISI 1: Partition ditambah (distributor_id, tahun, periode)
         MAX(st.upd_date) OVER (
             PARTITION BY st.distributor_id, st.tahun, st.periode
         ) AS upd_date_terakhir
 
-    FROM {{ source('raw_ficom_m3', 'v_fcustsls_staging') }} st
+    FROM raw_ficom_m3.v_fcustsls_staging st
     WHERE st.flag_aktif = 'Y'
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
 ),
 
--- 2. DEDUP STRICT SESUAI DISTINCT ON (distributor_id, cust_id, sls_id, periode)
+-- 2. DEDUP STRICT SESUAI DISTINCT ON (distributor_id, cust_id, sls_id, year, period)
 cte_cb_filtered AS (
     SELECT DISTINCT ON (distributor_id, cust_id, sls_id, year, period)
         sd_id,
@@ -71,7 +70,7 @@ cte_cb_filtered AS (
         year,
         cust_id
     FROM cte_cb_snapshot
-    WHERE upd_date = upd_date_terakhir -- 👈 Hanya loloskan tgl update terakhir di periode tsb
+    WHERE upd_date = upd_date_terakhir
     ORDER BY distributor_id, cust_id, sls_id, year, period DESC
 ),
 
