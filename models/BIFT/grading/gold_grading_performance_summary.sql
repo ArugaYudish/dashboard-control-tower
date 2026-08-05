@@ -220,4 +220,4 @@ FULL OUTER JOIN cte_grading_summary g
     ON  c.distributor_id = g.distributor_id
     AND c.salesforce_id  = g.salesforce_id
     AND c.year           = g.year
-    AND c.period         = g.period;
+    AND c.period         = g.period
