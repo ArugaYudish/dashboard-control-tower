@@ -9,31 +9,16 @@ WITH
 -- 1. STAGING SNAPSHOT: CARI upd_date TERAKHIR PER DISTRIBUTOR & PERIODE
 cte_cb_snapshot AS (
     SELECT 
-        st.sd_id,
-        st.sd_nm,
-        st.grsm_id,
-        st.grsm_nm,
-        st.rsm_id,
-        st.rsm_nm,
-        st.ss_id,
-        st.ss_nm,
-        st.sls_id,
-        st.sls_nm,
         st.distributor_id,
-        st.distributor_nm,
-        st.group_channel_id,
-        st.group_channel_nm,
-        st.channel_id,
-        st.channel_nm,
-        st.salesforce_id,
-        st.gsalesforce_id AS group_sales_force_id,
-        st.gsalesforce_nm AS group_sales_force_nm,
-        st.salesforce_nm,
+        st.sls_id,
+        st.cust_id,
         st.periode AS period,
         st.tahun AS year,
-        st.cust_id,
+        st.channel_id,
+        st.salesforce_id,
         st.upd_date,
         
+        -- Snapshot upd_date terakhir per distributor, tahun, dan periode
         MAX(st.upd_date) OVER (
             PARTITION BY st.distributor_id, st.tahun, st.periode
         ) AS upd_date_terakhir
@@ -43,35 +28,50 @@ cte_cb_snapshot AS (
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
 ),
 
--- 2. DEDUP STRICT SESUAI DISTINCT ON (distributor_id, cust_id, sls_id, year, period)
+-- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (SEMUA DARI raw_ficom_m3)
 cte_cb_filtered AS (
-    SELECT DISTINCT ON (distributor_id, cust_id, sls_id, year, period)
-        sd_id,
-        sd_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        sls_id,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        group_channel_id,
-        group_channel_nm,
-        channel_id,
-        channel_nm,
-        salesforce_id,
-        group_sales_force_id,
-        group_sales_force_nm,
-        salesforce_nm,
-        period,
-        year,
-        cust_id
-    FROM cte_cb_snapshot
-    WHERE upd_date = upd_date_terakhir
-    ORDER BY distributor_id, cust_id, sls_id, year, period DESC
+    SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.sls_id, s.year, s.period)
+        a.sd_id,
+        a.sd_nm,
+        a.grsm_id,
+        a.grsm_nm,
+        a.rsm_id,
+        a.rsm_nm,
+        a.ss_id,
+        a.ss_nm,
+        a.sls_id,
+        ms.sls_nm,
+        c.distributor_id,
+        md.distributor_nm,
+        e.group_channel_id,
+        e.group_channel_nm,
+        e.channel_id,
+        e.channel_nm,
+        s.period,
+        s.year,
+        mmgs.gsalesforce_id AS group_sales_force_id,
+        mmgs.gsalesforce_nm AS group_sales_force_nm,
+        s.salesforce_id,
+        mmgs.salesforce_nm,
+        s.cust_id
+    FROM raw_ficom_m3.v_salesman_hierarchy a
+    JOIN raw_ficom_m3.m_employee b
+        ON a.ss_id = b.emp_id
+    JOIN raw_ficom_m3.m_salesman_spv c
+        ON c.sls_id = a.sls_id AND c.distributor_id = a.distributor_id
+    JOIN cte_cb_snapshot s
+        ON s.distributor_id = c.distributor_id AND s.sls_id = c.sls_id
+    JOIN raw_ficom_m3.m_group_channels e
+        ON s.channel_id = e.channel_id
+    LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mmgs
+        ON s.salesforce_id::text = mmgs.salesforce_id::text
+    LEFT JOIN raw_ficom_m3.m_salesman ms
+        ON c.distributor_id = ms.distributor_id AND c.sls_id = ms.sls_id
+    LEFT JOIN raw_ficom_m3.m_distributor md
+        ON c.distributor_id = md.distributor_id
+    WHERE b.terminate_date IS NULL
+      AND s.upd_date = s.upd_date_terakhir
+    ORDER BY s.distributor_id, s.cust_id, s.sls_id, s.year, s.period DESC
 ),
 
 -- 3. AGGREGATE CB UNIK PER HIERARCHY & PERIODE
@@ -221,4 +221,4 @@ FULL OUTER JOIN cte_grading_summary g
     ON  c.distributor_id = g.distributor_id
     AND c.salesforce_id  = g.salesforce_id
     AND c.year           = g.year
-    AND c.period         = g.period
+    AND c.period         = g.period;
