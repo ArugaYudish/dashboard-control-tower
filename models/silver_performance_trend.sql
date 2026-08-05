@@ -101,9 +101,30 @@ fdos as (
 ),
 sales as
 (
-  select year, period, parent_id, sum(coalesce(salfo_qty,0)) as salfo_qty, sum(coalesce(stm_qty,0)) as stm_qty  
-   from spx.silver_sales_performance_parent ssp 
-  group by year, period, parent_id
+	select 	stm.year, stm.period, stm.parent_id, sum(stm_qty) as stm_qty, sum(salfo_qty) as salfo_qty
+	from 
+	(	
+		select year, week, period, parent_id, qty as stm_qty 
+		from (	
+		  select ssp.year, ssp.week, ssp.period, parent_id, sum(stm_qty) qty
+		   from spx.silver_sales_performance_parent ssp 
+		   inner join cycle_week cw on ssp.year = cw.year and ssp.period = cw.period and ssp.week = cw.week		   
+		group by ssp.year, ssp.week, ssp.period, parent_id  
+		) a 
+		where qty is not null 
+	) stm 
+	inner join (	
+		select year, week, period, parent_id, qty as salfo_qty
+		from (	
+		  select ssp.year, ssp.week, ssp.period, parent_id, sum(salfo_qty) qty
+		   from spx.silver_sales_performance_parent ssp 
+		   inner join cycle_week cw on ssp.year = cw.year and ssp.period = cw.period and ssp.week = cw.week
+		group by ssp.year, ssp.week, ssp.period, parent_id
+		) a 
+		where qty is not null 
+	) slf 
+	on stm.year = slf.year and stm.period = slf.period and stm.week = slf.week and stm.parent_id = slf.parent_id 
+	group by stm.year, stm.period, stm.parent_id
 )
 select   ph.div_id as sbu_id, ph.div_nm as sbu_name,
   ph.brand_id, ph.brand_nm as brand_name,
