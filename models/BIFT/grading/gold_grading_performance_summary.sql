@@ -81,10 +81,11 @@ cte_cb AS (
         gsalesforce_id, gsalesforce_nm, year, period
 ),
 
--- 4. FACT GRADING SUMMARY
+-- 4. FACT GRADING SUMMARY (MEMBAWA sls_id)
 cte_outlet_latest_grade AS (
     SELECT
-        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, sls_nm,
+        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, 
+        sls_id, sls_nm,
         distributor_id, distributor_nm, salesforce_id, salesforce_nm,
         gsalesforce_nm AS group_sales_force_nm, group_channel_nm,
         outlet_id, grade, is_ec_avis, is_ec_display, is_ec_transaction,
@@ -98,7 +99,8 @@ cte_outlet_latest_grade AS (
 
 cte_grading_summary AS (
     SELECT
-        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, sls_nm,
+        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, 
+        sls_id, sls_nm,
         distributor_id, distributor_nm, salesforce_id, salesforce_nm,
         group_sales_force_nm, group_channel_nm,
 
@@ -114,12 +116,13 @@ cte_grading_summary AS (
     FROM cte_outlet_latest_grade
     WHERE rn = 1
     GROUP BY
-        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, sls_nm,
+        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, 
+        sls_id, sls_nm,
         distributor_id, distributor_nm, salesforce_id, salesforce_nm,
         group_sales_force_nm, group_channel_nm
 )
 
--- 5. COMBINE SUMMARY (TANPA TITIK KOMA DI UJUNG)
+-- 5. COMBINE SUMMARY (FULL OUTER JOIN HARMONIS)
 SELECT
     COALESCE(g.year, c.year) AS year,
     COALESCE(g.period, c.period) AS period,
@@ -130,6 +133,7 @@ SELECT
     COALESCE(g.grsm_nm, c.grsm_nm) AS grsm_nm,
     COALESCE(g.rsm_nm, c.rsm_nm) AS rsm_nm,
     COALESCE(g.ss_nm, c.ss_nm) AS ss_nm,
+    COALESCE(g.sls_id, c.sls_id) AS sls_id,
     COALESCE(g.sls_nm, c.sls_nm, '') AS sls_nm,
     
     COALESCE(g.distributor_id, c.distributor_id) AS distributor_id,
