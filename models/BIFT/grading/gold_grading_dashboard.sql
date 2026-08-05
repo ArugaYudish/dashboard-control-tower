@@ -3,6 +3,7 @@
     materialized = 'table',
     indexes = [
       {'columns': ['year', 'period', 'week']},
+      {'columns': ['report_date', 'visit_date', 'inv_date']},
       {'columns': ['sd_id', 'nsm_id', 'grsm_id', 'rsm_id', 'ss_id']},
       {'columns': ['distributor_id', 'outlet_id', 'pcode']},
       {'columns': ['subbrand_id']},
@@ -27,12 +28,12 @@ WITH latest_fcustsls AS (
     FROM raw_ficom_m3.v_fcustsls_staging
 ),
 
--- 1. ANCHOR HIERARKI SALESMAN M3 (DENGAN LEFT JOIN KE MASTER SALESMAN UNTUK MENDAPATKAN sls_nm)
+-- 1. ANCHOR HIERARKI SALESMAN M3
 cte_m3_hierarchy AS (
     SELECT DISTINCT
         h.distributor_id::varchar AS distributor_id,
         h.sls_id::varchar AS sls_id,
-        COALESCE(ms.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm, -- 👈 CATCHING NAMA SALESMAN
+        COALESCE(ms.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
         h.sd_id, h.sd_nm,
         h.nsm_id, h.nsm_nm,
         h.grsm_id, h.grsm_nm,
@@ -138,18 +139,22 @@ cte_sales_item AS (
     GROUP BY s.subdist_id::varchar, s.custno::varchar, s.pcode::varchar, c.year, c.period, c.week
 ),
 
--- 5. KONSOLIDASI ITEM ACTIVITY
+-- 5. KONSOLIDASI ITEM ACTIVITY (FIX DUPES & EXPLICIT DATES)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
         COALESCE(av.outlet_id, s.outlet_id) AS outlet_id,
-        COALESCE(s.sls_id, av.sls_id) AS sls_id,
+        COALESCE(av.sls_id, s.sls_id) AS sls_id,
         s.salesforce_id AS salesforce_id_sales,
         COALESCE(av.pcode, s.pcode) AS pcode,
         COALESCE(av.kode_ap, 'N/A') AS kode_ap,
         COALESCE(av.year, s.year) AS year,
         COALESCE(av.period, s.period) AS period,
         COALESCE(av.week, s.week) AS week,
+        
+        -- Tanggal Spesifik & Primary Fallback
+        av.max_visit_date AS visit_date,
+        s.max_inv_date AS inv_date,
         COALESCE(av.max_visit_date, s.max_inv_date) AS activity_date,
         
         COALESCE(av.total_facing, 0) AS total_facing,
@@ -158,8 +163,12 @@ item_activity AS (
         COALESCE(s.total_inv_val, 0) AS total_inv_val
     FROM cte_avis_item av
     FULL OUTER JOIN cte_sales_item s
-        ON av.distributor_id = s.distributor_id AND av.outlet_id = s.outlet_id
-       AND av.pcode = s.pcode AND av.year = s.year AND av.week = s.week
+        ON av.distributor_id = s.distributor_id 
+       AND av.outlet_id = s.outlet_id
+       AND av.sls_id = s.sls_id  -- 👈 FIX: Cegah duplikasi antar-salesman berbeda
+       AND av.pcode = s.pcode 
+       AND av.year = s.year 
+       AND av.week = s.week
 )
 
 -- MAIN QUERY FULL ATTRIBUTES & FALLBACKS
@@ -167,16 +176,20 @@ SELECT
     act.year,
     act.period,
     act.week,
-    act.activity_date AS visit_date,
     
-    -- 1. HIERARKI SALESMAN & NAMA SALESMAN (sls_nm)
+    -- TANGGAL EKSPLISIT DAN PEMERSATU (SAFE FOR BI)
+    act.activity_date AS report_date, -- 👈 Core Fallback Date
+    act.visit_date,                   -- 👈 Tanggal IR Murni (NULL jika transaksi tanpa visit)
+    act.inv_date,                     -- 👈 Tanggal Invoice Murni
+    
+    -- 1. HIERARKI SALESMAN & NAMA SALESMAN
     h.sd_id, h.sd_nm,
     h.nsm_id, h.nsm_nm,
     h.grsm_id, h.grsm_nm,
     h.rsm_id, h.rsm_nm,
     h.ss_id, h.ss_nm,
     act.sls_id,
-    COALESCE(h.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm, -- 👈 DIPILIH DI SELECT UTAMA
+    COALESCE(h.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
     
     -- 2. DISTRIBUTOR & OUTLET
     act.distributor_id,
