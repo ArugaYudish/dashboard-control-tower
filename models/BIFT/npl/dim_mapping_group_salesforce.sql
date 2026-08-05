@@ -11,8 +11,8 @@
     )
 }}
 
-WITH combined AS (
-    SELECT
+WITH m1 AS (
+    SELECT DISTINCT ON (salesforce_id)
         'm1' AS source_schema,
         salesforce_id,
         salesforce_nm,
@@ -21,13 +21,14 @@ WITH combined AS (
         gsalesforce_id                          AS gsalesforce2_id,
         gsalesforce_nm                          AS gsalesforce2_nm,
         div_id,
-        div_nm,
-        _airbyte_extracted_at
+        div_nm
     FROM raw_ficom_m1.m_mapping_group_salesforce
+    WHERE salesforce_id IS NOT NULL
+    ORDER BY salesforce_id, _airbyte_extracted_at DESC NULLS LAST
+),
 
-    UNION ALL
-
-    SELECT
+m2 AS (
+    SELECT DISTINCT ON (salesforce_id)
         'm2' AS source_schema,
         salesforce_id,
         salesforce_nm,
@@ -42,13 +43,14 @@ WITH combined AS (
         gsalesforce_id                          AS gsalesforce2_id,
         gsalesforce_nm                          AS gsalesforce2_nm,
         div_id,
-        div_nm,
-        _airbyte_extracted_at
+        div_nm
     FROM raw_ficom_m2.m_mapping_group_salesforce
+    WHERE salesforce_id IS NOT NULL
+    ORDER BY salesforce_id, _airbyte_extracted_at DESC NULLS LAST
+),
 
-    UNION ALL
-
-    SELECT
+m3 AS (
+    SELECT DISTINCT ON (salesforce_id)
         'm3' AS source_schema,
         salesforce_id,
         salesforce_nm,
@@ -57,33 +59,14 @@ WITH combined AS (
         gsalesforce_id                          AS gsalesforce2_id,
         gsalesforce_nm                          AS gsalesforce2_nm,
         div_id,
-        div_nm,
-        _airbyte_extracted_at
+        div_nm
     FROM raw_ficom_m3.m_mapping_group_salesforce
+    WHERE salesforce_id IS NOT NULL
+    ORDER BY salesforce_id, _airbyte_extracted_at DESC NULLS LAST
 )
 
-SELECT DISTINCT ON (source_schema, salesforce_id)
-    source_schema,
-
-    -- Salesforce (break-by level 3)
-    salesforce_id,
-    salesforce_nm,
-
-    -- Group Salesforce 1 — Inti / Non Inti (M2 only, NULL for M1 & M3)
-    gsalesforce1_id,
-    gsalesforce1_nm,
-
-    -- Group Salesforce 2 — e.g. Modern Trade, Traditional Trade …
-    gsalesforce2_id,
-    gsalesforce2_nm,
-
-    -- Division
-    div_id,
-    div_nm
-
-FROM combined
-WHERE salesforce_id IS NOT NULL
-ORDER BY
-    source_schema,
-    salesforce_id,
-    _airbyte_extracted_at DESC NULLS LAST
+SELECT * FROM m1
+UNION ALL
+SELECT * FROM m2
+UNION ALL
+SELECT * FROM m3

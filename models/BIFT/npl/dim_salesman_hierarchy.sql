@@ -79,7 +79,22 @@ WITH combined_hierarchy AS (
 )
 SELECT 
     h.source_schema,
-    
+
+    -- 0. Grand Division (derived from source_schema + sd_nm pattern)
+    CASE
+        WHEN h.source_schema = 'm2'                        THEN '10'
+        WHEN h.source_schema = 'm3'                        THEN '03'
+        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%' THEN '05'
+        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%' THEN '06'
+    END                                                     AS gdiv_id,
+
+    CASE
+        WHEN h.source_schema = 'm2'                        THEN 'M245'
+        WHEN h.source_schema = 'm3'                        THEN 'M3'
+        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%' THEN 'BIS'
+        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%' THEN 'CWC'
+    END                                                     AS gdiv_nm,
+
     -- 1. Sales Director (SD)
     h.sd_id,
     h.sd_nm,
