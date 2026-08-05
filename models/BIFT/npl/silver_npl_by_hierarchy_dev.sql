@@ -49,7 +49,6 @@ cb_cover AS (
         FROM bift.dim_fcustsls_staging
         WHERE tahun   = 2026
           AND periode IN (4, 5)
-          AND distributor_id = '103481'                -- DEV filter: single distributor
     ) cs
     INNER JOIN (
         SELECT *
@@ -64,7 +63,6 @@ vfsales_filtered AS (
     SELECT *
     FROM raw_ho.vfsales_det
     WHERE sts         = '905'
-      AND subdist_id  = '103481'                -- DEV filter: single distributor
 ),
 
 -- STEP 2: Enriched transaction rows (resolved date & week from spx.m_cycle3)
