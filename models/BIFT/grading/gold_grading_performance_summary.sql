@@ -27,7 +27,7 @@ cte_cb_snapshot AS (
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
 ),
 
--- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (SESUAI KOLOM AIRBYTE)
+-- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (EXPLICIT ALIASES)
 cte_cb_filtered AS (
     SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.sls_id, s.year, s.period)
         a.sd_id,
@@ -76,36 +76,36 @@ cte_cb_filtered AS (
 -- 3. AGGREGATE CB UNIK PER HIERARCHY & PERIODE
 cte_cb AS (
     SELECT
-        sd_id,
-        sd_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        sls_id,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        group_channel_id,
-        group_channel_nm,
-        channel_id,
-        channel_nm,
-        salesforce_id,
-        salesforce_nm,
-        group_sales_force_id,
-        group_sales_force_nm,
-        year,
-        period,
+        f.sd_id,
+        f.sd_nm,
+        f.grsm_id,
+        f.grsm_nm,
+        f.rsm_id,
+        f.rsm_nm,
+        f.ss_id,
+        f.ss_nm,
+        f.sls_id,
+        f.sls_nm,
+        f.distributor_id,
+        f.distributor_nm,
+        f.group_channel_id,
+        f.group_channel_nm,
+        f.channel_id,
+        f.channel_nm,
+        f.salesforce_id,
+        f.salesforce_nm,
+        f.group_sales_force_id,
+        f.group_sales_force_nm,
+        f.year,
+        f.period,
 
-        COUNT(DISTINCT cust_id) AS cb_count
-    FROM cte_cb_filtered
+        COUNT(DISTINCT f.cust_id) AS cb_count
+    FROM cte_cb_filtered f
     GROUP BY
-        sd_id, sd_nm, grsm_id, grsm_nm, rsm_id, rsm_nm, ss_id, ss_nm,
-        sls_id, sls_nm, distributor_id, distributor_nm, group_channel_id, group_channel_nm,
-        channel_id, channel_nm, salesforce_id, salesforce_nm, group_sales_force_id,
-        group_sales_force_nm, year, period
+        f.sd_id, f.sd_nm, f.grsm_id, f.grsm_nm, f.rsm_id, f.rsm_nm, f.ss_id, f.ss_nm,
+        f.sls_id, f.sls_nm, f.distributor_id, f.distributor_nm, f.group_channel_id, f.group_channel_nm,
+        f.channel_id, f.channel_nm, f.salesforce_id, f.salesforce_nm, f.group_sales_force_id,
+        f.group_sales_force_nm, f.year, f.period
 ),
 
 -- 4. FACT GRADING (GRADE TERAKHIR TOKO DI PERIODE TERSEBUT)
