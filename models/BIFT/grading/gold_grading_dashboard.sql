@@ -86,7 +86,7 @@ cte_grading_store_fallback AS (
     GROUP BY distributor_id, outlet_id, year, period, week
 ),
 
--- 3. IR DISPLAY
+-- 3. IR DISPLAY (FIX: INCLUDE VISIT_DATE IN GROUP BY)
 cte_manual_dedup AS (
     SELECT 
         distributor_id::varchar AS distributor_id, outlet_id::varchar AS outlet_id,
@@ -114,20 +114,28 @@ cte_avis_raw_joined AS (
 
 cte_avis_item AS (
     SELECT 
-        r.distributor_id, r.outlet_id, r.pcode, c.year, c.period, c.week,
-        MAX(r.sls_id) AS sls_id, MAX(r.kode_ap) AS kode_ap, MAX(r.visit_date) AS max_visit_date,
-        SUM(r.count_facing) AS total_facing, 1 AS is_in_ir_table
+        r.distributor_id, r.outlet_id, r.pcode, 
+        r.visit_date::date AS visit_date, -- 👈 Masuk GROUP BY biar presisi per tanggal
+        c.year, c.period, c.week,
+        MAX(r.sls_id) AS sls_id, 
+        MAX(r.kode_ap) AS kode_ap, 
+        SUM(r.count_facing) AS total_facing, 
+        1 AS is_in_ir_table
     FROM cte_avis_raw_joined r
     LEFT JOIN spx.m_cycle3 c ON r.visit_date::date = c.cdate::date
-    GROUP BY r.distributor_id, r.outlet_id, r.pcode, c.year, c.period, c.week
+    GROUP BY r.distributor_id, r.outlet_id, r.pcode, r.visit_date::date, c.year, c.period, c.week
 ),
 
--- 4. TRANSAKSI SALES SFA
+-- 4. TRANSAKSI SALES SFA (FIX: INCLUDE INV_DATE IN GROUP BY)
 cte_sales_item AS (
     SELECT 
-        s.subdist_id::varchar AS distributor_id, s.custno::varchar AS outlet_id, s.pcode::varchar AS pcode,
+        s.subdist_id::varchar AS distributor_id, 
+        s.custno::varchar AS outlet_id, 
+        s.pcode::varchar AS pcode,
+        s.inv_date::date AS inv_date, -- 👈 Masuk GROUP BY biar presisi per tanggal
         c.year, c.period, c.week,
-        MAX(s.slsno::varchar) AS sls_id, MAX(s.slsfc_id::varchar) AS salesforce_id, MAX(s.inv_date::date) AS max_inv_date,
+        MAX(s.slsno::varchar) AS sls_id, 
+        MAX(s.slsfc_id::varchar) AS salesforce_id, 
         SUM(COALESCE(s.inv_qty::numeric, 0)) AS total_inv_qty,
         SUM(COALESCE(s.inv_val::numeric, 0)) AS total_inv_val
     FROM raw_ho.vfsales_det s
@@ -136,10 +144,10 @@ cte_sales_item AS (
     LEFT JOIN spx.m_cycle3 c ON s.inv_date::date = c.cdate::date
     WHERE s.inv_date >= '2025-01-01'
       AND (COALESCE(s.inv_qty::numeric, 0) > 0 OR COALESCE(s.inv_val::numeric, 0) > 0)
-    GROUP BY s.subdist_id::varchar, s.custno::varchar, s.pcode::varchar, c.year, c.period, c.week
+    GROUP BY s.subdist_id::varchar, s.custno::varchar, s.pcode::varchar, s.inv_date::date, c.year, c.period, c.week
 ),
 
--- 5. KONSOLIDASI ITEM ACTIVITY (FIX DUPES & EXPLICIT DATES)
+-- 5. KONSOLIDASI ITEM ACTIVITY (PRECISE DATE & SALESMAN JOIN)
 item_activity AS (
     SELECT 
         COALESCE(av.distributor_id, s.distributor_id) AS distributor_id,
@@ -152,10 +160,10 @@ item_activity AS (
         COALESCE(av.period, s.period) AS period,
         COALESCE(av.week, s.week) AS week,
         
-        -- Tanggal Spesifik & Primary Fallback
-        av.max_visit_date AS visit_date,
-        s.max_inv_date AS inv_date,
-        COALESCE(av.max_visit_date, s.max_inv_date) AS activity_date,
+        -- DATES HANDLING
+        av.visit_date AS visit_date,
+        s.inv_date AS inv_date,
+        COALESCE(av.visit_date, s.inv_date) AS activity_date,
         
         COALESCE(av.total_facing, 0) AS total_facing,
         COALESCE(av.is_in_ir_table, 0) AS is_in_ir_table,
@@ -165,8 +173,9 @@ item_activity AS (
     FULL OUTER JOIN cte_sales_item s
         ON av.distributor_id = s.distributor_id 
        AND av.outlet_id = s.outlet_id
-       AND av.sls_id = s.sls_id  -- 👈 FIX: Cegah duplikasi antar-salesman berbeda
+       AND av.sls_id = s.sls_id  
        AND av.pcode = s.pcode 
+       AND av.visit_date = s.inv_date -- 👈 JOIN TANGGAL EKSPLISIT
        AND av.year = s.year 
        AND av.week = s.week
 )
@@ -177,10 +186,10 @@ SELECT
     act.period,
     act.week,
     
-    -- TANGGAL EKSPLISIT DAN PEMERSATU (SAFE FOR BI)
-    act.activity_date AS report_date, -- 👈 Core Fallback Date
-    act.visit_date,                   -- 👈 Tanggal IR Murni (NULL jika transaksi tanpa visit)
-    act.inv_date,                     -- 👈 Tanggal Invoice Murni
+    -- TANGGAL EKSPLISIT UNTUK BI
+    act.activity_date AS report_date,
+    act.visit_date,
+    act.inv_date,
     
     -- 1. HIERARKI SALESMAN & NAMA SALESMAN
     h.sd_id, h.sd_nm,
