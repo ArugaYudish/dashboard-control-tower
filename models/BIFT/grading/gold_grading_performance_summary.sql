@@ -18,7 +18,6 @@ cte_cb_snapshot AS (
         st.salesforce_id,
         st.upd_date,
         
-        -- Snapshot upd_date terakhir per distributor, tahun, dan periode
         MAX(st.upd_date) OVER (
             PARTITION BY st.distributor_id, st.tahun, st.periode
         ) AS upd_date_terakhir
@@ -28,7 +27,7 @@ cte_cb_snapshot AS (
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
 ),
 
--- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (SEMUA DARI raw_ficom_m3)
+-- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (SESUAI KOLOM AIRBYTE)
 cte_cb_filtered AS (
     SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.sls_id, s.year, s.period)
         a.sd_id,
@@ -49,10 +48,10 @@ cte_cb_filtered AS (
         e.channel_nm,
         s.period,
         s.year,
+        s.salesforce_id,
+        mmgs.salesforce_nm AS salesforce_nm,
         mmgs.gsalesforce_id AS group_sales_force_id,
         mmgs.gsalesforce_nm AS group_sales_force_nm,
-        s.salesforce_id,
-        mmgs.salesforce_nm,
         s.cust_id
     FROM raw_ficom_m3.v_salesman_hierarchy a
     JOIN raw_ficom_m3.m_employee b
@@ -94,9 +93,9 @@ cte_cb AS (
         channel_id,
         channel_nm,
         salesforce_id,
+        salesforce_nm,
         group_sales_force_id,
         group_sales_force_nm,
-        salesforce_nm,
         year,
         period,
 
@@ -105,8 +104,8 @@ cte_cb AS (
     GROUP BY
         sd_id, sd_nm, grsm_id, grsm_nm, rsm_id, rsm_nm, ss_id, ss_nm,
         sls_id, sls_nm, distributor_id, distributor_nm, group_channel_id, group_channel_nm,
-        channel_id, channel_nm, salesforce_id, group_sales_force_id,
-        group_sales_force_nm, salesforce_nm, year, period
+        channel_id, channel_nm, salesforce_id, salesforce_nm, group_sales_force_id,
+        group_sales_force_nm, year, period
 ),
 
 -- 4. FACT GRADING (GRADE TERAKHIR TOKO DI PERIODE TERSEBUT)
@@ -221,4 +220,4 @@ FULL OUTER JOIN cte_grading_summary g
     ON  c.distributor_id = g.distributor_id
     AND c.salesforce_id  = g.salesforce_id
     AND c.year           = g.year
-    AND c.period         = g.period
+    AND c.period         = g.period;
