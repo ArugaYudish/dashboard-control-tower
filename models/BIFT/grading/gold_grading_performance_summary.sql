@@ -27,7 +27,7 @@ cte_cb_snapshot AS (
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
 ),
 
--- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI (SESUAI DDL METADATA DB)
+-- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI
 cte_cb_filtered AS (
     SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.sls_id, s.year, s.period)
         a.sd_id,
@@ -49,9 +49,9 @@ cte_cb_filtered AS (
         s.period,
         s.year,
         s.salesforce_id,
-        mmgs.salesforce_nm AS salesforce_nm,
-        mmgs.gsalesforce_id AS group_sales_force_id,
-        mmgs.gsalesforce_nm AS group_sales_force_nm,
+        mmgs.salesforce_nm,
+        mmgs.gsalesforce_id,
+        mmgs.gsalesforce_nm,
         s.cust_id
     FROM raw_ficom_m3.v_salesman_hierarchy a
     JOIN raw_ficom_m3.m_employee b
@@ -94,8 +94,8 @@ cte_cb AS (
         channel_nm,
         salesforce_id,
         salesforce_nm,
-        group_sales_force_id,
-        group_sales_force_nm,
+        gsalesforce_id AS group_sales_force_id,
+        gsalesforce_nm AS group_sales_force_nm,
         year,
         period,
 
@@ -120,8 +120,8 @@ cte_cb AS (
         channel_nm,
         salesforce_id,
         salesforce_nm,
-        group_sales_force_id,
-        group_sales_force_nm,
+        gsalesforce_id,
+        gsalesforce_nm,
         year,
         period
 ),
@@ -142,7 +142,7 @@ cte_outlet_latest_grade AS (
         distributor_nm,
         salesforce_id,
         salesforce_nm,
-        group_sales_force_nm,
+        gsalesforce_nm AS group_sales_force_nm,
         group_channel_nm,
         subbrand_nm,
         pcode,
