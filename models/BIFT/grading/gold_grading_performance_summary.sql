@@ -81,7 +81,7 @@ cte_cb AS (
         gsalesforce_id, gsalesforce_nm, year, period
 ),
 
--- 4. FACT GRADING SUMMARY (DISAMAKAN GRANULARITASNYA TANPA BREAKDOWN PCODE)
+-- 4. FACT GRADING SUMMARY
 cte_outlet_latest_grade AS (
     SELECT
         year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, sls_nm,
@@ -119,7 +119,7 @@ cte_grading_summary AS (
         group_sales_force_nm, group_channel_nm
 )
 
--- 5. COMBINE SUMMARY (GRANULARITAS SETARA: SALESMAN + DISTRIBUTOR + PERIODE)
+-- 5. COMBINE SUMMARY (TANPA TITIK KOMA DI UJUNG)
 SELECT
     COALESCE(g.year, c.year) AS year,
     COALESCE(g.period, c.period) AS period,
@@ -156,4 +156,4 @@ FULL OUTER JOIN cte_grading_summary g
     AND c.salesforce_id  = g.salesforce_id
     AND c.sls_id         = g.sls_id
     AND c.year           = g.year
-    AND c.period         = g.period;
+    AND c.period         = g.period
