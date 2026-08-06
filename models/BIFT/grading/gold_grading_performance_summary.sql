@@ -6,7 +6,7 @@
 }}
 
 WITH 
--- 1. STAGING SNAPSHOT: CARI upd_date TERAKHIR PER DISTRIBUTOR & PERIODE
+-- 1. STAGING SNAPSHOT CUSTOMER BASE (KHUSUS TAHUN 2026)
 cte_cb_snapshot AS (
     SELECT 
         st.distributor_id,
@@ -17,225 +17,167 @@ cte_cb_snapshot AS (
         st.channel_id,
         st.salesforce_id,
         st.upd_date,
-        
         MAX(st.upd_date) OVER (
             PARTITION BY st.distributor_id, st.tahun, st.periode
         ) AS upd_date_terakhir
-
     FROM raw_ficom_m3.v_fcustsls_staging st
     WHERE st.flag_aktif = 'Y'
       AND st.salesforce_id NOT IN ('999', '116', '213', '222')
+      AND st.tahun = 2026
 ),
 
--- 2. DEDUP & JOIN KE TABEL MASTER HIRARKI
 cte_cb_filtered AS (
     SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.sls_id, s.year, s.period)
-        a.sd_id,
-        a.sd_nm,
-        a.grsm_id,
-        a.grsm_nm,
-        a.rsm_id,
-        a.rsm_nm,
-        a.ss_id,
-        a.ss_nm,
-        a.sls_id,
-        ms.sls_nm,
-        c.distributor_id,
-        md.distributor_nm,
-        e.group_channel_id,
-        e.group_channel_nm,
-        e.channel_id,
-        e.channel_nm,
-        s.period,
-        s.year,
-        s.salesforce_id,
-        mmgs.salesforce_nm,
-        mmgs.gsalesforce_id,
-        mmgs.gsalesforce_nm,
+        a.sd_id, a.sd_nm,
+        a.nsm_id, a.nsm_nm,
+        a.grsm_id, a.grsm_nm,
+        a.rsm_id, a.rsm_nm,
+        a.ss_id, a.ss_nm,
+        a.sls_id, ms.sls_nm,
+        c.distributor_id, md.distributor_nm,
+        e.group_channel_id, e.group_channel_nm,
+        e.channel_id, e.channel_nm,
+        s.period, s.year,
+        s.salesforce_id, mmgs.salesforce_nm,
+        mmgs.gsalesforce_id AS group_sales_force_id,
+        mmgs.gsalesforce_nm AS group_sales_force_nm,
         s.cust_id
     FROM raw_ficom_m3.v_salesman_hierarchy a
-    JOIN raw_ficom_m3.m_employee b
-        ON a.ss_id = b.emp_id
-    JOIN raw_ficom_m3.m_salesman_spv c
-        ON c.sls_id = a.sls_id AND c.distributor_id = a.distributor_id
-    JOIN cte_cb_snapshot s
-        ON s.distributor_id = c.distributor_id AND s.sls_id = c.sls_id
-    JOIN raw_ficom_m3.m_group_channels e
-        ON s.channel_id = e.channel_id
-    LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mmgs
-        ON s.salesforce_id::text = mmgs.salesforce_id::text
-    LEFT JOIN raw_ficom_m3.m_salesman ms
-        ON c.distributor_id = ms.distributor_id AND c.sls_id = ms.sls_id
-    LEFT JOIN raw_ficom_m3.m_distributor md
-        ON c.distributor_id = md.distributor_id
+    JOIN raw_ficom_m3.m_employee b ON a.ss_id = b.emp_id
+    JOIN raw_ficom_m3.m_salesman_spv c ON c.sls_id = a.sls_id AND c.distributor_id = a.distributor_id
+    JOIN cte_cb_snapshot s ON s.distributor_id = c.distributor_id AND s.sls_id = c.sls_id
+    JOIN raw_ficom_m3.m_group_channels e ON s.channel_id = e.channel_id
+    LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mmgs ON s.salesforce_id::text = mmgs.salesforce_id::text
+    LEFT JOIN raw_ficom_m3.m_salesman ms ON c.distributor_id = ms.distributor_id AND c.sls_id = ms.sls_id
+    LEFT JOIN raw_ficom_m3.m_distributor md ON c.distributor_id = md.distributor_id
     WHERE b.terminate_date IS NULL
       AND s.upd_date = s.upd_date_terakhir
     ORDER BY s.distributor_id, s.cust_id, s.sls_id, s.year, s.period DESC
 ),
 
--- 3. AGGREGATE CB UNIK PER HIERARCHY & PERIODE
 cte_cb AS (
     SELECT
-        sd_id,
-        sd_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        sls_id,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        group_channel_id,
-        group_channel_nm,
-        channel_id,
-        channel_nm,
-        salesforce_id,
-        salesforce_nm,
-        gsalesforce_id AS group_sales_force_id,
-        gsalesforce_nm AS group_sales_force_nm,
-        year,
-        period,
-
+        year, period,
+        sd_id, sd_nm, nsm_id, nsm_nm, grsm_id, grsm_nm, rsm_id, rsm_nm, ss_id, ss_nm, sls_id, sls_nm,
+        distributor_id, distributor_nm, salesforce_id, salesforce_nm,
+        group_sales_force_id, group_sales_force_nm, group_channel_id, group_channel_nm,
         COUNT(DISTINCT cust_id) AS cb_count
     FROM cte_cb_filtered
     GROUP BY
-        sd_id,
-        sd_nm,
-        grsm_id,
-        grsm_nm,
-        rsm_id,
-        rsm_nm,
-        ss_id,
-        ss_nm,
-        sls_id,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        group_channel_id,
-        group_channel_nm,
-        channel_id,
-        channel_nm,
-        salesforce_id,
-        salesforce_nm,
-        gsalesforce_id,
-        gsalesforce_nm,
-        year,
-        period
+        year, period,
+        sd_id, sd_nm, nsm_id, nsm_nm, grsm_id, grsm_nm, rsm_id, rsm_nm, ss_id, ss_nm, sls_id, sls_nm,
+        distributor_id, distributor_nm, salesforce_id, salesforce_nm,
+        group_sales_force_id, group_sales_force_nm, group_channel_id, group_channel_nm
 ),
 
--- 4. FACT GRADING (GRADE TERAKHIR TOKO DI PERIODE TERSEBUT)
+-- 2. TARGET CALL DARI M_NMRC_SUBDETAIL (KHUSUS TAHUN 2026)
+cte_tgt_call AS (
+    SELECT 
+        distributor_id,
+        sls_id,
+        tahun::int AS year,
+        periode::int AS period,
+        week::int AS week,
+        tgl::date AS report_date,
+        SUM(tgt_call::int) AS tgt_call_count
+    FROM raw_ficom_m3.m_nmrc_subdetail
+    WHERE tahun::int = 2026
+    GROUP BY 
+        distributor_id, sls_id, tahun, periode, week, tgl
+),
+
+-- 3. FACT GRADING DASHBOARD (KHUSUS TAHUN 2026)
 cte_outlet_latest_grade AS (
     SELECT
-        year,
-        period,
-        week,
-        sd_nm,
-        nsm_nm,
-        grsm_nm,
-        rsm_nm,
-        ss_nm,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        salesforce_id,
-        salesforce_nm,
-        gsalesforce_nm AS group_sales_force_nm,
-        group_channel_nm,
-        subbrand_nm,
-        pcode,
-        pcode_nm,
-        outlet_id,
-        grade,
-        is_ec_avis,
-        is_ec_display,
-        is_ec_transaction,
+        year, period, week, report_date,
+        sls_id, distributor_id, salesforce_id,
+        outlet_id, grade,
         ROW_NUMBER() OVER (
-            PARTITION BY year, period, distributor_id, outlet_id 
+            PARTITION BY year, period, week, report_date, distributor_id, outlet_id 
             ORDER BY report_date DESC
         ) AS rn
     FROM {{ ref('gold_grading_dashboard') }}
     WHERE salesforce_id NOT IN ('999', '116', '213', '222')
+      AND year = 2026
 ),
 
 cte_grading_summary AS (
     SELECT
-        year,
-        period,
-        week,
-        sd_nm,
-        nsm_nm,
-        grsm_nm,
-        rsm_nm,
-        ss_nm,
-        sls_nm,
-        distributor_id,
-        distributor_nm,
-        salesforce_id,
-        salesforce_nm,
-        group_sales_force_nm,
-        group_channel_nm,
-        subbrand_nm,
-        pcode,
-        pcode_nm,
-
+        year, period, week, report_date,
+        sls_id, distributor_id, salesforce_id,
         COUNT(DISTINCT outlet_id) AS oa_count,
         COUNT(CASE WHEN grade = 'A' THEN 1 END) AS grade_a_count,
         COUNT(CASE WHEN grade = 'B' THEN 1 END) AS grade_b_count,
         COUNT(CASE WHEN grade = 'C' THEN 1 END) AS grade_c_count,
-        COUNT(CASE WHEN grade NOT IN ('A', 'B', 'C') OR grade IS NULL THEN 1 END) AS non_grade_count,
-
-        MAX(is_ec_avis) AS is_ec_avis,
-        MAX(is_ec_display) AS is_ec_display,
-        MAX(is_ec_transaction) AS is_ec_transaction
+        COUNT(CASE WHEN grade NOT IN ('A', 'B', 'C') OR grade IS NULL THEN 1 END) AS non_grade_count
     FROM cte_outlet_latest_grade
     WHERE rn = 1
     GROUP BY
-        year, period, week, sd_nm, nsm_nm, grsm_nm, rsm_nm, ss_nm, sls_nm,
-        distributor_id, distributor_nm, salesforce_id, salesforce_nm,
-        group_sales_force_nm, group_channel_nm, subbrand_nm, pcode, pcode_nm
+        year, period, week, report_date,
+        sls_id, distributor_id, salesforce_id
+),
+
+-- 4. COMBINE TARGET CALL + GRADING FIRST
+cte_daily_activity AS (
+    SELECT 
+        COALESCE(g.distributor_id, tc.distributor_id) AS distributor_id,
+        COALESCE(g.sls_id, tc.sls_id) AS sls_id,
+        COALESCE(g.year, tc.year) AS year,
+        COALESCE(g.period, tc.period) AS period,
+        COALESCE(g.week, tc.week) AS week,
+        COALESCE(g.report_date, tc.report_date) AS report_date,
+        g.salesforce_id,
+        COALESCE(tc.tgt_call_count, 0) AS tgt_call_count,
+        COALESCE(g.oa_count, 0) AS oa_count,
+        COALESCE(g.grade_a_count, 0) AS grade_a_count,
+        COALESCE(g.grade_b_count, 0) AS grade_b_count,
+        COALESCE(g.grade_c_count, 0) AS grade_c_count,
+        COALESCE(g.non_grade_count, 0) AS non_grade_count
+    FROM cte_grading_summary g
+    FULL OUTER JOIN cte_tgt_call tc
+        ON  g.distributor_id = tc.distributor_id
+        AND g.sls_id         = tc.sls_id
+        AND g.year           = tc.year
+        AND g.period         = tc.period
+        AND g.week           = tc.week
+        AND g.report_date    = tc.report_date
 )
 
--- 5. COMBINE SUMMARY (FULL JOIN)
+-- 5. FINAL COMBINE KE MASTER CB TAHUN 2026
 SELECT
-    COALESCE(g.year, c.year) AS year,
-    COALESCE(g.period, c.period) AS period,
-    COALESCE(g.week, 0) AS week,
+    c.year,
+    c.period,
+    COALESCE(da.week, 0) AS week,
+    da.report_date,
     
-    COALESCE(g.sd_nm, c.sd_nm) AS sd_nm,
-    g.nsm_nm AS nsm_nm,
-    COALESCE(g.grsm_nm, c.grsm_nm) AS grsm_nm,
-    COALESCE(g.rsm_nm, c.rsm_nm) AS rsm_nm,
-    COALESCE(g.ss_nm, c.ss_nm) AS ss_nm,
-    COALESCE(g.sls_nm, c.sls_nm, '') AS sls_nm,
+    c.sd_nm,
+    c.nsm_nm,
+    c.grsm_nm,
+    c.rsm_nm,
+    c.ss_nm,
+    c.sls_id,
+    c.sls_nm,
     
-    COALESCE(g.distributor_id, c.distributor_id) AS distributor_id,
-    COALESCE(g.distributor_nm, c.distributor_nm) AS distributor_nm,
-    COALESCE(g.salesforce_id, c.salesforce_id) AS salesforce_id,
-    COALESCE(g.salesforce_nm, c.salesforce_nm) AS salesforce_nm,
-    COALESCE(g.group_sales_force_nm, c.group_sales_force_nm) AS group_sales_force_nm,
-    COALESCE(g.group_channel_nm, c.group_channel_nm) AS group_channel_nm,
-    
-    COALESCE(g.subbrand_nm, 'ALL SUBBRAND') AS subbrand_nm,
-    COALESCE(g.pcode, 'ALL PCODE') AS pcode,
-    COALESCE(g.pcode_nm, 'ALL PCODE') AS pcode_nm,
+    c.distributor_id,
+    c.distributor_nm,
+    c.salesforce_id,
+    c.salesforce_nm,
+    c.group_sales_force_nm,
+    c.group_channel_nm,
 
-    COALESCE(c.cb_count, 0) AS cb_count,
-    COALESCE(g.oa_count, 0) AS oa_count,
-    COALESCE(g.grade_a_count, 0) AS grade_a_count,
-    COALESCE(g.grade_b_count, 0) AS grade_b_count,
-    COALESCE(g.grade_c_count, 0) AS grade_c_count,
-    COALESCE(g.non_grade_count, 0) AS non_grade_count,
+    c.cb_count,
+    COALESCE(da.tgt_call_count, 0) AS tgt_call,
 
-    COALESCE(g.is_ec_avis, 1) AS is_ec_avis,
-    COALESCE(g.is_ec_display, 1) AS is_ec_display,
-    COALESCE(g.is_ec_transaction, 1) AS is_ec_transaction
+    COALESCE(da.oa_count, 0) AS oa_count,
+    COALESCE(da.grade_a_count, 0) AS grade_a_count,
+    COALESCE(da.grade_b_count, 0) AS grade_b_count,
+    COALESCE(da.grade_c_count, 0) AS grade_c_count,
+    COALESCE(da.non_grade_count, 0) AS non_grade_count
 
 FROM cte_cb c
-FULL OUTER JOIN cte_grading_summary g
-    ON  c.distributor_id = g.distributor_id
-    AND c.salesforce_id  = g.salesforce_id
-    AND c.year           = g.year
-    AND c.period         = g.period
+LEFT JOIN cte_daily_activity da
+    ON  c.distributor_id = da.distributor_id
+    AND c.sls_id         = da.sls_id
+    AND c.year           = da.year
+    AND c.period         = da.period
+    AND (c.salesforce_id = da.salesforce_id OR da.salesforce_id IS NULL)

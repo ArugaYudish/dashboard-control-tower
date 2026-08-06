@@ -17,7 +17,73 @@
     ]
 ) }}
 
-WITH agg AS (
+WITH open_weeks AS (
+    -- Minggu yang belum tutup: minggu berjalan + semua minggu ke depan.
+    -- Dipakai HANYA untuk mengklasifikasi minggu, bukan untuk membuang minggu.
+    -- Minggu berjalan tetap ada di tabel, hanya saja disaring (lihat `scoped`).
+    SELECT year, week
+    FROM spx.m_cycle3
+    GROUP BY year, week
+    HAVING MAX(cdate::date) >= CURRENT_DATE
+),
+
+scoped AS (
+    -- Minggu yang SUDAH tutup: semua baris ikut apa adanya, tanpa gerbang.
+    -- Slice yang punya salfo tapi tidak menjual apa pun adalah forecast miss
+    -- yang sebenarnya, jadi harus tetap menekan FA. Menyaringnya justru
+    -- menaikkan FA secara semu.
+    SELECT s.year, s.period, s.channel,
+           s.nsm_id, s.nsm_name, s.grsm_id, s.grsm_name,
+           s.rsm_id, s.rsm_name, s.ss_id, s.ss_name,
+           s.sbu_id, s.sbu_name, s.brand_id, s.brand_name,
+           s.subbrand_id, s.subbrand_name, s.parent_id, s.parent_name,
+           s.salfo_qty, s.stm_qty
+    FROM {{ ref('silver_sales_performance_parent') }} s
+    WHERE NOT EXISTS (
+        SELECT 1 FROM open_weeks ow
+        WHERE ow.year = s.year AND ow.week = s.week
+    )
+
+    UNION ALL
+
+    -- Minggu BERJALAN: stm masih menetes masuk, jadi salfo hanya dihitung untuk
+    -- slice yang sudah mencatat stm di minggu itu.
+    --
+    -- Gerbang versi pertama memakai grain (year, period, week, parent_id) dan
+    -- terlalu longgar: pertanyaannya "apakah parent ini punya stm di minggu itu,
+    -- di mana pun", bukan "apakah slice ini punya stm". Satu baris saudara di
+    -- distributor/channel/product-group lain menghidupkan minggu itu untuk
+    -- SELURUH slice parent tsb. Kasus nyata parent 100090 (MALKIST ABON FAM
+    -- PACK) 2026 P8: total_forecast 110,76 = 55,76 (mg31) + 55 (mg32) padahal
+    -- slice GT/ss 102008 tidak punya stm sama sekali di mg32.
+    --
+    -- PARTITION BY bersifat NULL-safe. Itu penting karena nsm/grsm/rsm/ss dan
+    -- sbu/brand/subbrand semuanya nullable -- equi-join di sini akan butuh
+    -- IS NOT DISTINCT FROM, predikat non-hashable yang penghapusannya membawa
+    -- model ini dari 43 menit jadi hitungan detik.
+    SELECT t.year, t.period, t.channel,
+           t.nsm_id, t.nsm_name, t.grsm_id, t.grsm_name,
+           t.rsm_id, t.rsm_name, t.ss_id, t.ss_name,
+           t.sbu_id, t.sbu_name, t.brand_id, t.brand_name,
+           t.subbrand_id, t.subbrand_name, t.parent_id, t.parent_name,
+           t.salfo_qty, t.stm_qty
+    FROM (
+        SELECT s.*,
+               SUM(s.stm_qty) OVER (
+                   PARTITION BY s.year, s.period, s.week, s.channel,
+                                s.nsm_id, s.grsm_id, s.rsm_id, s.ss_id,
+                                s.sbu_id, s.brand_id, s.subbrand_id, s.parent_id
+               ) AS slice_week_stm
+        FROM {{ ref('silver_sales_performance_parent') }} s
+        WHERE EXISTS (
+            SELECT 1 FROM open_weeks ow
+            WHERE ow.year = s.year AND ow.week = s.week
+        )
+    ) t
+    WHERE t.slice_week_stm IS NOT NULL
+),
+
+agg AS (
     -- Salfo dibaca langsung dari silver_sales_performance_parent, sama persis
     -- dengan silver_sales_performance_chart (CTE `base` -> `cy_rows.salfo`).
     -- Sebelumnya lewat gold_sales_target_performance, yang menggeser angka salfo:
@@ -37,6 +103,11 @@ WITH agg AS (
     -- dicek terhadap pasangan brand_id+subbrand_id karena subbrand_id tidak
     -- unik global). MIN(name) karena itu memilih dari satu nilai saja ->
     -- baris hasil identik, tapi hash key menyusut jadi 10 kolom.
+    --
+    -- total_actual tidak berubah sedikit pun oleh gerbang di `scoped`: minggu
+    -- tutup tidak disaring sama sekali, dan di minggu berjalan setiap baris
+    -- dengan stm_qty non-NULL pasti punya slice_week_stm non-NULL juga. Jadi
+    -- tidak ada aktual yang bisa terbuang -- yang berkurang hanya total_forecast.
     SELECT
         year::int   AS year,
         period::int AS period,
@@ -57,7 +128,7 @@ WITH agg AS (
         -- tanpa membayar COALESCE per baris.
         SUM(salfo_qty)             AS total_forecast,
         COALESCE(SUM(stm_qty), 0)  AS total_actual
-    FROM {{ ref('silver_sales_performance_parent') }}
+    FROM scoped
     GROUP BY
         year, period, channel,
         nsm_id, grsm_id, rsm_id, ss_id,
