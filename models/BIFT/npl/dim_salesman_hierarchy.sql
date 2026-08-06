@@ -29,7 +29,7 @@ WITH combined_hierarchy AS (
         h.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m1.v_salesman_hierarchy h
-    JOIN raw_ficom_m1.m_employee e
+    LEFT JOIN raw_ficom_m1.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
 
@@ -51,7 +51,7 @@ WITH combined_hierarchy AS (
         h.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m2.v_salesman_hierarchy h
-    JOIN raw_ficom_m2.m_employee e
+    LEFT JOIN raw_ficom_m2.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
 
@@ -73,7 +73,7 @@ WITH combined_hierarchy AS (
         h.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m3.v_salesman_hierarchy h
-    JOIN raw_ficom_m3.m_employee e
+    LEFT JOIN raw_ficom_m3.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
 )

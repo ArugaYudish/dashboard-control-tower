@@ -7,22 +7,37 @@
 WITH combined_staging AS (
     SELECT 
         'm1' AS source_schema,
-        *
-    FROM raw_ficom_m1.v_fcustsls_staging
+        f.*,
+        gc.channel_nm,
+        gc.group_channel_id,
+        gc.group_channel_nm
+    FROM raw_ficom_m1.v_fcustsls_staging f
+    INNER JOIN raw_ficom_m1.m_group_channels gc
+            ON f.channel_id = gc.channel_id
 
     UNION ALL
 
     SELECT 
         'm2' AS source_schema,
-        *
-    FROM raw_ficom_m2.v_fcustsls_staging
+        f.*,
+        gc.channel_nm,
+        gc.group_channel_id,
+        gc.group_channel_nm
+    FROM raw_ficom_m2.v_fcustsls_staging f
+    INNER JOIN raw_ficom_m2.m_group_channels gc
+            ON f.channel_id = gc.channel_id
 
     UNION ALL
 
     SELECT 
         'm3' AS source_schema,
-        *
-    FROM raw_ficom_m3.v_fcustsls_staging
+        f.*,
+        gc.channel_nm,
+        gc.group_channel_id,
+        gc.group_channel_nm
+    FROM raw_ficom_m3.v_fcustsls_staging f
+    INNER JOIN raw_ficom_m3.m_group_channels gc
+            ON f.channel_id = gc.channel_id
 ),
 
 staging_with_max_date AS (
@@ -73,6 +88,9 @@ SELECT
     tahun,
     periode,
     channel_id,
+    channel_nm,
+    group_channel_id,
+    group_channel_nm,
     flag_aktif,
     group_outlet,
     salesforce_id,
