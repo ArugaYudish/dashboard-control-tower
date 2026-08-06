@@ -71,9 +71,9 @@ cb_cover AS (
         CASE WHEN NULLIF(cs.gsalesforce2_id, '') IS NOT NULL 
              THEN cs.gsalesforce2_id || ' - ' || COALESCE(cs.gsalesforce2_nm, '') ELSE '' END AS gsalesforce2_nm,
 
-        COALESCE(sh.salesforce_id, '')                                                  AS salesforce_id,
-        CASE WHEN NULLIF(sh.salesforce_id, '') IS NOT NULL 
-             THEN sh.salesforce_id || ' - ' || COALESCE(sh.salesforce_nm, '') ELSE '' END AS salesforce_nm,
+        COALESCE(cs.salesforce_id, '')                                                  AS salesforce_id,
+        CASE WHEN NULLIF(cs.salesforce_id, '') IS NOT NULL 
+             THEN cs.salesforce_id || ' - ' || COALESCE(cs.salesforce_nm, '') ELSE '' END AS salesforce_nm,
 
         -- Salesman, Channel & Outlet
         COALESCE(cs.sls_id, '')                                                         AS sls_id,
