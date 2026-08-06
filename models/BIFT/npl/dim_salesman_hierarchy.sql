@@ -137,4 +137,3 @@ LEFT JOIN bift.dim_salesman sm
       AND h.sls_id        = sm.sls_id
 LEFT JOIN spx.m_distributor md
         ON md.distributor_id = h.distributor_id
-WHERE sm.salesforce_id NOT IN ('999', '116', '213', '222')
