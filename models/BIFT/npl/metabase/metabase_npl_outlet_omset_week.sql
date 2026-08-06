@@ -1,24 +1,11 @@
--- NPL Outlet Weekly Omset
--- Output: Distributor | Outlet | Group Channel | Channel | Week | Omset
--- Source: gold_npl_outlet_detail_dev
-
 SELECT
-    CASE WHEN distributor_id IS NOT NULL
-         THEN CONCAT(distributor_id, ' - ', distributor_nm)
-         ELSE NULL END                              AS "Distributor",
-    CASE WHEN cust_id IS NOT NULL
-         THEN CONCAT(cust_id, ' - ', cust_nm)
-         ELSE NULL END                              AS "Outlet",
-    CASE WHEN group_channel_id IS NOT NULL
-         THEN CONCAT(group_channel_id, ' - ', group_channel_nm)
-         ELSE NULL END                              AS "Group Channel",
-    CASE WHEN channel_id IS NOT NULL
-         THEN CONCAT(channel_id, ' - ', channel_nm)
-         ELSE NULL END                              AS "Channel",
+    nullIf(distributor_nm, '')                      AS "Distributor",
+    nullIf(cust_nm, '')                             AS "Outlet",
+    nullIf(channel_nm, '')                          AS "Channel",
 
     week                                            AS "Week",
 
-    SUM(
+    sum(
         CASE WHEN 1=1
             [[ AND {{pcodes}} ]]
             [[ AND {{subbrands}} ]]
@@ -26,9 +13,8 @@ SELECT
         END
     )                                               AS "Omset"
 
-FROM gold_npl_outlet_detail_dev
+FROM default.gold_npl_outlet_detail
 WHERE 1=1
-  AND is_transaction = 1        -- only transacting rows carry real omset
   [[ AND {{tahun}} ]]
   [[ AND {{periodes}} ]]
   [[ AND {{weeks}} ]]
@@ -45,11 +31,9 @@ WHERE 1=1
   [[ AND {{channel_ids}} ]]
   [[ AND {{sls_ids}} ]]
   [[ AND {{classification_ids}} ]]
+  [[ AND {{cust_ids}} ]]
 
 GROUP BY
-    distributor_id, distributor_nm,
-    cust_id, cust_nm,
-    channel_id, channel_nm,
-    group_channel_id, group_channel_nm,
-    week
-ORDER BY distributor_id, cust_id, week;
+    distributor_nm, cust_nm, channel_nm, week
+ORDER BY
+    distributor_nm, cust_nm, week;

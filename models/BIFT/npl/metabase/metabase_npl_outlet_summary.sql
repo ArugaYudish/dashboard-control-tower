@@ -1,40 +1,29 @@
--- NPL Outlet-Level Summary
--- Output: Distributor | Outlet | Group Channel | Channel | Total Dropsize | Order Count | Bucket | Status
--- Source: gold_npl_outlet_detail_dev
-
 WITH outlet_stats AS (
     SELECT
-        distributor_id,
-        distributor_nm,
+        nullIf(distributor_nm, '')     AS "Distributor",
+        nullIf(cust_nm, '')            AS "Outlet",
+        nullIf(channel_nm, '')         AS "Channel",
         cust_id,
-        cust_nm,
-        channel_id,
-        channel_nm,
-        group_channel_id,
-        group_channel_nm,
 
-        -- Total order count across the full period (all pcodes × weeks)
-        SUM(
+        sum(
             CASE WHEN 1=1
                 [[ AND {{pcodes}} ]]
                 [[ AND {{subbrands}} ]]
                 THEN order_count ELSE 0
             END
-        )                                   AS total_order_count,
+        )                              AS total_order_count,
 
-        -- Total qty carton (for dropsize)
-        SUM(
+        sum(
             CASE WHEN 1=1
                 [[ AND {{pcodes}} ]]
                 [[ AND {{subbrands}} ]]
                 THEN qty_carton ELSE 0
             END
-        )                                   AS total_qty_carton,
+        )                              AS total_qty_carton,
 
-        -- 1 if this outlet ever transacted in the period, 0 if never
-        MAX(is_transaction)                 AS is_transaction
+        max(is_transaction)            AS is_tx
 
-    FROM gold_npl_outlet_detail_dev
+    FROM default.gold_npl_outlet_detail
     WHERE 1=1
       [[ AND {{tahun}} ]]
       [[ AND {{periodes}} ]]
@@ -52,45 +41,29 @@ WITH outlet_stats AS (
       [[ AND {{channel_ids}} ]]
       [[ AND {{sls_ids}} ]]
       [[ AND {{classification_ids}} ]]
+      [[ AND {{cust_ids}} ]]
 
     GROUP BY
-        distributor_id, distributor_nm,
-        cust_id, cust_nm,
-        channel_id, channel_nm,
-        group_channel_id, group_channel_nm
+        "Distributor", "Outlet", "Channel", cust_id
 )
 
 SELECT
-    CASE WHEN distributor_id IS NOT NULL
-         THEN CONCAT(distributor_id, ' - ', distributor_nm)
-         ELSE NULL END                              AS "Distributor",
-    CASE WHEN cust_id IS NOT NULL
-         THEN CONCAT(cust_id, ' - ', cust_nm)
-         ELSE NULL END                              AS "Outlet",
-    CASE WHEN group_channel_id IS NOT NULL
-         THEN CONCAT(group_channel_id, ' - ', group_channel_nm)
-         ELSE NULL END                              AS "Group Channel",
-    CASE WHEN channel_id IS NOT NULL
-         THEN CONCAT(channel_id, ' - ', channel_nm)
-         ELSE NULL END                              AS "Channel",
+    "Distributor",
+    "Outlet",
+    "Channel",
 
-    ROUND(total_qty_carton::numeric, 2)             AS "Total Dropsize",
+    round(total_qty_carton, 2)                     AS "Total Dropsize",
 
-    CASE
-        WHEN total_order_count = 0  THEN 'No Transaction'
-        WHEN total_order_count = 1  THEN 'Non Repeat'
-        WHEN total_order_count = 2  THEN 'T2'
-        WHEN total_order_count = 3  THEN 'T3'
-        WHEN total_order_count = 4  THEN 'T4'
-        WHEN total_order_count = 5  THEN 'T5'
-        WHEN total_order_count >= 6 THEN 'T6'
-    END                                             AS "Bucket",
+    CASE WHEN total_order_count = 1  THEN 1 ELSE 0 END AS "Non Repeat",
+    CASE WHEN total_order_count = 2  THEN 1 ELSE 0 END AS "T2",
+    CASE WHEN total_order_count = 3  THEN 1 ELSE 0 END AS "T3",
+    CASE WHEN total_order_count = 4  THEN 1 ELSE 0 END AS "T4",
+    CASE WHEN total_order_count = 5  THEN 1 ELSE 0 END AS "T5",
+    CASE WHEN total_order_count >= 6 THEN 1 ELSE 0 END AS "T6",
 
-    total_order_count                               AS "Order Count",
-
-    CASE WHEN is_transaction = 1 THEN 'Transaction'
-         ELSE 'No Transaction'
+    CASE WHEN is_tx = 1 THEN 'Transaction'
+         ELSE 'Non Transaction'
     END                                             AS "Status"
 
 FROM outlet_stats
-ORDER BY distributor_id, cust_id;
+ORDER BY "Distributor", "Outlet";

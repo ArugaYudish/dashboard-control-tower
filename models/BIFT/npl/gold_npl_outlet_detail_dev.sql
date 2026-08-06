@@ -15,7 +15,7 @@
     )
 }}
 
--- DEV/TESTING ONLY: Direct Gold Outlet Detail Model (sd_id = 'WF0220', tahun = 2026, periode IN (4, 5))
+-- DEV/TESTING ONLY: Direct Gold Outlet Detail Model (tahun = 2026, periode IN (4, 5))
 -- Built directly from Raw Sources (bypassing Silver).
 -- Pre-formats all _nm columns as "ID - Name" (or '' if ID is null/empty).
 -- Guaranteed 100% NULL-FREE across all columns.
@@ -30,7 +30,7 @@ WITH week_bridge AS (
       AND "period"::numeric IN (4, 5)
 ),
 
--- Covered outlets enriched with salesman hierarchy (DEV filtered to sd_id = 'WF0220', 2026 P4-P5)
+-- Covered outlets enriched with salesman hierarchy (DEV filtered to 2026 P4-P5)
 cb_cover AS (
     SELECT
         COALESCE(cs.source_schema, '')                                                  AS source_schema,
@@ -97,11 +97,7 @@ cb_cover AS (
         WHERE tahun   = 2026
           AND periode IN (4, 5)
     ) cs
-    INNER JOIN (
-        SELECT *
-        FROM bift.dim_salesman_hierarchy
-        WHERE sd_id = 'WF0220'
-    ) sh
+    INNER JOIN bift.dim_salesman_hierarchy sh
             ON cs.distributor_id = sh.distributor_id
            AND cs.sls_id         = sh.sls_id
 ),
