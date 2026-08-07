@@ -12,7 +12,7 @@
 }}
 
 WITH customer_with_location AS (
-    SELECT 
+    SELECT DISTINCT ON (dc.distributor_id, dc.cust_id)
         dc.distributor_id,
         dc.cust_id,
         dc.cust_nm,
@@ -32,6 +32,7 @@ WITH customer_with_location AS (
        AND dc.kabupaten = loc.kabupaten_code
        AND dc.kecamatan = loc.kecamatan_code
        AND dc.kelurahan = loc.kelurahan_code
+    ORDER BY dc.distributor_id, dc.cust_id
 )
 
 SELECT 
@@ -90,4 +91,3 @@ LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
 LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
-

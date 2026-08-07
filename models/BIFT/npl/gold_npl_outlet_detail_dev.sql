@@ -100,6 +100,7 @@ cb_cover AS (
     INNER JOIN bift.dim_salesman_hierarchy sh
             ON cs.distributor_id = sh.distributor_id
            AND cs.sls_id         = sh.sls_id
+           AND cs.source_schema  = sh.source_schema
 ),
 
 -- Raw transactions enriched with date -> cycle3 week + product detail (DEV filtered)

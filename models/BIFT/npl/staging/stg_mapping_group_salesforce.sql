@@ -4,7 +4,7 @@
     )
 }}
 
-SELECT
+SELECT DISTINCT ON (source_schema, salesforce_id)
     salesforce_id,
     salesforce_nm,
     gsalesforce1_id,
@@ -61,3 +61,4 @@ FROM (
         'm3' AS source_schema
     FROM raw_ficom_m3.m_mapping_group_salesforce
 ) AS combined
+ORDER BY source_schema, salesforce_id, div_id

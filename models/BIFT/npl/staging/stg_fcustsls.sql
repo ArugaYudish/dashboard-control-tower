@@ -12,8 +12,11 @@ WITH m1_staging AS (
         gc.group_channel_id,
         gc.group_channel_nm
     FROM raw_ficom_m1.v_fcustsls_staging f
-    INNER JOIN raw_ficom_m1.m_group_channels gc
-            ON f.channel_id = gc.channel_id
+    INNER JOIN (
+        SELECT DISTINCT ON (channel_id) *
+        FROM raw_ficom_m1.m_group_channels
+        ORDER BY channel_id
+    ) gc ON f.channel_id = gc.channel_id
 ),
 
 m2_staging AS (
@@ -24,8 +27,11 @@ m2_staging AS (
         gc.group_channel_id,
         gc.group_channel_nm
     FROM raw_ficom_m2.v_fcustsls_staging f
-    INNER JOIN raw_ficom_m2.m_group_channels gc
-            ON f.channel_id = gc.channel_id
+    INNER JOIN (
+        SELECT DISTINCT ON (channel_id) *
+        FROM raw_ficom_m2.m_group_channels
+        ORDER BY channel_id
+    ) gc ON f.channel_id = gc.channel_id
 ),
 
 m3_staging AS (
@@ -36,8 +42,11 @@ m3_staging AS (
         gc.group_channel_id,
         gc.group_channel_nm
     FROM raw_ficom_m3.v_fcustsls_staging f
-    INNER JOIN raw_ficom_m3.m_group_channels gc
-            ON f.channel_id = gc.channel_id
+    INNER JOIN (
+        SELECT DISTINCT ON (channel_id) *
+        FROM raw_ficom_m3.m_group_channels
+        ORDER BY channel_id
+    ) gc ON f.channel_id = gc.channel_id
 ),
 
 combined_staging AS (
