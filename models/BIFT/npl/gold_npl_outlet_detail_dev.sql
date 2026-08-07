@@ -10,7 +10,8 @@
           {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'},
           {'columns': ['is_transaction'], 'type': 'btree'},
           {'columns': ['sls_id'], 'type': 'btree'},
-          {'columns': ['classification_id'], 'type': 'btree'}
+          {'columns': ['classification_id'], 'type': 'btree'},
+          {'columns': ['gdiv_id'], 'type': 'btree'}
         ]
     )
 }}
@@ -36,6 +37,11 @@ cb_cover AS (
         COALESCE(cs.source_schema, '')                                                  AS source_schema,
         COALESCE(cs.tahun, 0)                                                           AS tahun,
         COALESCE(cs.periode, 0)                                                         AS periode,
+
+        -- Grand Division
+        COALESCE(sh.gdiv_id, '')                                                        AS gdiv_id,
+        CASE WHEN NULLIF(sh.gdiv_id, '') IS NOT NULL 
+             THEN sh.gdiv_id || ' - ' || COALESCE(sh.gdiv_nm, '') ELSE '' END           AS gdiv_nm,
 
         -- Sales Hierarchy
         COALESCE(sh.sd_id, '')                                                          AS sd_id,
@@ -145,7 +151,8 @@ non_purchasing AS (
         cb.periode,
         wb.week,
 
-        -- Sales Hierarchy
+        -- Grand Division & Sales Hierarchy
+        cb.gdiv_id, cb.gdiv_nm,
         cb.sd_id, cb.sd_nm,
         cb.nsm_id, cb.nsm_nm,
         cb.grsm_id, cb.grsm_nm,
@@ -198,6 +205,7 @@ non_purchasing AS (
     )
     GROUP BY
         cb.source_schema, cb.tahun, cb.periode, wb.week,
+        cb.gdiv_id, cb.gdiv_nm,
         cb.sd_id, cb.sd_nm, cb.nsm_id, cb.nsm_nm, cb.grsm_id, cb.grsm_nm,
         cb.rsm_id, cb.rsm_nm, cb.ss_id, cb.ss_nm, cb.distributor_id, cb.distributor_nm,
         cb.gsalesforce1_id, cb.gsalesforce1_nm, cb.gsalesforce2_id, cb.gsalesforce2_nm,
@@ -217,7 +225,8 @@ purchasing AS (
         cb.periode,
         t.week,
 
-        -- Sales Hierarchy
+        -- Grand Division & Sales Hierarchy
+        cb.gdiv_id, cb.gdiv_nm,
         cb.sd_id, cb.sd_nm,
         cb.nsm_id, cb.nsm_nm,
         cb.grsm_id, cb.grsm_nm,
@@ -263,6 +272,7 @@ purchasing AS (
            ON cc.classification_id = dc.classification_id
     GROUP BY
         cb.source_schema, cb.tahun, cb.periode, t.week,
+        cb.gdiv_id, cb.gdiv_nm,
         cb.sd_id, cb.sd_nm, cb.nsm_id, cb.nsm_nm, cb.grsm_id, cb.grsm_nm,
         cb.rsm_id, cb.rsm_nm, cb.ss_id, cb.ss_nm, cb.distributor_id, cb.distributor_nm,
         cb.gsalesforce1_id, cb.gsalesforce1_nm, cb.gsalesforce2_id, cb.gsalesforce2_nm,

@@ -54,7 +54,7 @@ WITH outlet_orders AS (
       [[ AND {{channel_ids}} ]]
       [[ AND {{sls_ids}} ]]
       [[ AND {{classification_ids}} ]]
-      [[ AND {{cust_ids}} ]]
+      [[ AND {{app_url}} = {{app_url}} ]]
 
     GROUP BY
         "SD", "NSM", "GRSM", "RSM", "SS", "Distributor", dist_cust_key, "Break By"
@@ -69,7 +69,7 @@ SELECT
         (uniqExactIf(dist_cust_key, pcode_order_count >= 1) / nullIf(uniqExact(dist_cust_key), 0)) * 100, 2
     )                                                                               AS "%OA",
     round(
-        sum(pcode_qty_carton) / nullIf(uniqExactIf(dist_cust_key, pcode_order_count >= 1), 0), 2
+        sum(pcode_qty_carton) / nullIf(sum(pcode_order_count), 0), 2
     )                                                                               AS "Total Dropsize",
 
     uniqExactIf(dist_cust_key, pcode_order_count = 1)                              AS "Non Repeat",
@@ -81,7 +81,8 @@ SELECT
 
     round(
         (uniqExactIf(dist_cust_key, pcode_order_count >= 2) / nullIf(uniqExactIf(dist_cust_key, pcode_order_count >= 1), 0)) * 100, 2
-    )                                                                               AS "%Repeat"
+    )                                                                               AS "%Repeat",
+    toString({{app_url}})                                                           AS "app_url"
 
 FROM outlet_orders
 WHERE "Break By" IS NOT NULL AND "Break By" != ''

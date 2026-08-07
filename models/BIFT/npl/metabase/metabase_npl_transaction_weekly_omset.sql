@@ -1,17 +1,13 @@
 SELECT
     nullIf(distributor_nm, '')                      AS "Distributor",
     nullIf(cust_nm, '')                             AS "Outlet",
+    nullIf(sls_nm, '')                              AS "Salesman",
     nullIf(channel_nm, '')                          AS "Channel",
 
     week                                            AS "Week",
 
-    sum(
-        CASE WHEN 1=1
-            [[ AND {{pcodes}} ]]
-            [[ AND {{subbrands}} ]]
-            THEN inv_val ELSE 0
-        END
-    )                                               AS "Omset"
+    sum(inv_val)                                    AS "Omset By Val",
+    round(sum(qty_carton), 2)                       AS "Omset By Qty"
 
 FROM default.gold_npl_outlet_detail
 WHERE 1=1
@@ -32,8 +28,10 @@ WHERE 1=1
   [[ AND {{sls_ids}} ]]
   [[ AND {{classification_ids}} ]]
   [[ AND {{cust_ids}} ]]
+  [[ AND {{pcodes}} ]]
+  [[ AND {{subbrands}} ]]
 
 GROUP BY
-    distributor_nm, cust_nm, channel_nm, week
+    distributor_nm, cust_nm, sls_nm, channel_nm, week
 ORDER BY
-    distributor_nm, cust_nm, week;
+    distributor_nm, cust_nm, sls_nm, week;

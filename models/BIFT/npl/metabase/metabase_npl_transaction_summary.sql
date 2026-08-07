@@ -2,8 +2,9 @@ WITH outlet_stats AS (
     SELECT
         nullIf(distributor_nm, '')     AS "Distributor",
         nullIf(cust_nm, '')            AS "Outlet",
+        nullIf(sls_nm, '')             AS "Salesman",
         nullIf(channel_nm, '')         AS "Channel",
-        cust_id,
+        concat(distributor_id, '_', sls_id, '_', cust_id) AS dist_sls_cust_key,
 
         sum(
             CASE WHEN 1=1
@@ -44,15 +45,18 @@ WITH outlet_stats AS (
       [[ AND {{cust_ids}} ]]
 
     GROUP BY
-        "Distributor", "Outlet", "Channel", cust_id
+        "Distributor", "Outlet", "Salesman", "Channel", dist_sls_cust_key
 )
 
 SELECT
     "Distributor",
     "Outlet",
+    "Salesman",
     "Channel",
 
-    round(total_qty_carton, 2)                     AS "Total Dropsize",
+    round(
+        total_qty_carton / nullIf(total_order_count, 0), 2
+    )                                               AS "Total Dropsize",
 
     CASE WHEN total_order_count = 1  THEN 1 ELSE 0 END AS "Non Repeat",
     CASE WHEN total_order_count = 2  THEN 1 ELSE 0 END AS "T2",
@@ -66,4 +70,4 @@ SELECT
     END                                             AS "Status"
 
 FROM outlet_stats
-ORDER BY "Distributor", "Outlet";
+ORDER BY "Distributor", "Outlet", "Salesman";

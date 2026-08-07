@@ -18,14 +18,8 @@ SELECT
 
     week                           AS "Week",
 
-    sum(
-        CASE
-            WHEN 1=1
-            [[ AND {{pcodes}} ]]
-            [[ AND {{subbrands}} ]]
-            THEN inv_val ELSE 0
-        END
-    )                              AS "Omset"
+    sum(inv_val)                   AS "Omset By Val",
+    round(sum(qty_carton), 2)      AS "Omset By Qty"
 
 FROM default.gold_npl_outlet_detail
 WHERE is_transaction = 1
@@ -45,6 +39,8 @@ WHERE is_transaction = 1
   [[ AND {{channel_ids}} ]]
   [[ AND {{sls_ids}} ]]
   [[ AND {{classification_ids}} ]]
+  [[ AND {{pcodes}} ]]
+  [[ AND {{subbrands}} ]]
 
 GROUP BY
     "SD", "NSM", "GRSM", "RSM", "SS", "Distributor", "Break By", week

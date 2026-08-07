@@ -25,8 +25,8 @@ WITH combined_hierarchy AS (
         h.rsm_nm,
         h.ss_id,
         h.ss_nm,
-        h.distributor_id,
-        h.sls_id,
+        c.distributor_id,
+        c.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m1.v_salesman_hierarchy h
     JOIN raw_ficom_m1.m_employee e
@@ -50,8 +50,8 @@ WITH combined_hierarchy AS (
         h.rsm_nm,
         h.ss_id,
         h.ss_nm,
-        h.distributor_id,
-        h.sls_id,
+        c.distributor_id,
+        c.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m2.v_salesman_hierarchy h
     JOIN raw_ficom_m2.m_employee e
@@ -75,8 +75,8 @@ WITH combined_hierarchy AS (
         h.rsm_nm,
         h.ss_id,
         h.ss_nm,
-        h.distributor_id,
-        h.sls_id,
+        c.distributor_id,
+        c.sls_id,
         h._airbyte_extracted_at
     FROM raw_ficom_m3.v_salesman_hierarchy h
     JOIN raw_ficom_m3.m_employee e
@@ -89,19 +89,21 @@ WITH combined_hierarchy AS (
 SELECT 
     h.source_schema,
 
-    -- 0. Grand Division (derived from source_schema + sd_nm pattern)
+    -- 0. Grand Division (mapped via sd_id / source_schema)
     CASE
-        WHEN h.source_schema = 'm2'                        THEN '10'
-        WHEN h.source_schema = 'm3'                        THEN '03'
-        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%' THEN '05'
-        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%' THEN '06'
+        WHEN h.sd_id = 'WF0221' OR h.source_schema = 'm3'                           THEN '03'
+        WHEN h.sd_id = 'WF0218' OR (h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%') THEN '06'
+        WHEN h.sd_id = 'WF0217' OR (h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%') THEN '05'
+        WHEN h.sd_id = 'WF0220' OR h.source_schema = 'm2'                           THEN '10'
+        ELSE ''
     END                                                     AS gdiv_id,
 
     CASE
-        WHEN h.source_schema = 'm2'                        THEN 'M245'
-        WHEN h.source_schema = 'm3'                        THEN 'M3'
-        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%' THEN 'BIS'
-        WHEN h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%' THEN 'CWC'
+        WHEN h.sd_id = 'WF0221' OR h.source_schema = 'm3'                           THEN 'M3'
+        WHEN h.sd_id = 'WF0218' OR (h.source_schema = 'm1' AND h.sd_nm ILIKE '%CWC%') THEN 'CWC'
+        WHEN h.sd_id = 'WF0217' OR (h.source_schema = 'm1' AND h.sd_nm ILIKE '%BIS%') THEN 'BIS'
+        WHEN h.sd_id = 'WF0220' OR h.source_schema = 'm2'                           THEN 'M245'
+        ELSE ''
     END                                                     AS gdiv_nm,
 
     -- 1. Sales Director (SD)

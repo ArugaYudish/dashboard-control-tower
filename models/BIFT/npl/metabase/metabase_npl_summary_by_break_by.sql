@@ -61,8 +61,8 @@ bucket_summary AS (
 SELECT
     "Summary By",
     bucket.1 AS bucket_order,
-    bucket.2 AS "Repeat Bucket",
-    bucket.3 AS "Outlet Count"
+    bucket.2 AS "Repeat",
+    bucket.3 AS "Outlet"
 FROM bucket_summary
 ARRAY JOIN [
     (1, 'T1', t1),
