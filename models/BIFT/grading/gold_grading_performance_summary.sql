@@ -150,4 +150,4 @@ SELECT * FROM summary_cb
 UNION ALL
 SELECT * FROM summary_tc
 UNION ALL
-SELECT * FROM summary_act;
+SELECT * FROM summary_act
