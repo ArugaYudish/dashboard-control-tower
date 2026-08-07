@@ -6,7 +6,7 @@
 }}
 
 WITH 
--- 0. MASTER HIERARKI AKTIF (FILTER UTAMA)
+-- 0. MASTER HIERARKI AKTIF
 active_hierarchy AS (
     SELECT DISTINCT 
         a.sd_id, a.sd_nm,
@@ -24,7 +24,7 @@ active_hierarchy AS (
     WHERE b.terminate_date IS NULL
 ),
 
--- 1. DATA CUSTOMER BASE (BULANAN - TAHUN 2026)
+-- 1. DATA CUSTOMER BASE (BULANAN)
 cte_cb_snapshot AS (
     SELECT 
         st.distributor_id, st.sls_id, st.cust_id,
@@ -62,7 +62,7 @@ gold_cb_rows AS (
     GROUP BY year, period, sd_id, sd_nm, nsm_id, nsm_nm, grsm_id, grsm_nm, rsm_id, rsm_nm, ss_id, ss_nm, sls_id, sls_nm, distributor_id, distributor_nm, salesforce_id, salesforce_nm, group_sales_force_id, group_sales_force_nm, group_channel_id, group_channel_nm
 ),
 
--- 2. DATA TARGET CALL (DAILY/WEEKLY - TAHUN 2026)
+-- 2. DATA TARGET CALL (DAILY/WEEKLY)
 gold_tc_rows AS (
     SELECT
         tc.tahun::int AS year, tc.periode::int AS period, tc.week::int AS week, tc.tgl::date AS report_date,
@@ -79,18 +79,19 @@ gold_tc_rows AS (
     GROUP BY tc.tahun, tc.periode, tc.week, tc.tgl, ah.sd_id, ah.sd_nm, ah.nsm_id, ah.nsm_nm, ah.grsm_id, ah.grsm_nm, ah.rsm_id, ah.rsm_nm, ah.ss_id, ah.ss_nm, ah.sls_id, ah.sls_nm, ah.distributor_id, ah.distributor_nm
 ),
 
--- 3. DATA FACT GRADING (DAILY/WEEKLY - TAHUN 2026)
+-- 3. DATA FACT GRADING (DEDUP OUTLET PER PERIODE & HARIAN)
 cte_outlet_latest_grade AS (
     SELECT
-        year, period, week, report_date,
-        sls_id, distributor_id, salesforce_id, outlet_id, grade,
+        g.year, g.period, g.week, g.report_date,
+        g.sls_id, g.distributor_id, g.salesforce_id, g.outlet_id, g.grade,
         ROW_NUMBER() OVER (
-            PARTITION BY year, period, week, report_date, distributor_id, outlet_id 
-            ORDER BY report_date DESC
+            PARTITION BY g.year, g.period, g.week, g.report_date, g.distributor_id, g.outlet_id 
+            ORDER BY g.report_date DESC
         ) AS rn
-    FROM {{ ref('gold_grading_dashboard') }}
-    WHERE salesforce_id NOT IN ('999', '116', '213', '222')
-      AND year = 2026
+    FROM {{ ref('gold_grading_dashboard') }} g
+    JOIN active_hierarchy ah ON g.distributor_id = ah.distributor_id AND g.sls_id = ah.sls_id
+    WHERE g.salesforce_id NOT IN ('999', '116', '213', '222')
+      AND g.year = 2026
 ),
 gold_grading_rows AS (
     SELECT
