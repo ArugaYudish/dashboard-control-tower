@@ -15,6 +15,29 @@
     )
 }}
 
+WITH customer_with_location AS (
+    SELECT 
+        dc.distributor_id,
+        dc.cust_id,
+        dc.cust_nm,
+        dc.latitude,
+        dc.longitude,
+        loc.provinsi_code,
+        loc.provinsi_name,
+        loc.kabupaten_code,
+        loc.kabupaten_name,
+        loc.kecamatan_code,
+        loc.kecamatan_name,
+        loc.kelurahan_code,
+        loc.kelurahan_name
+    FROM bift.dim_customer dc
+    LEFT JOIN bift.dim_lokasi loc
+        ON dc.provinsi = loc.provinsi_code
+       AND dc.kabupaten = loc.kabupaten_code
+       AND dc.kecamatan = loc.kecamatan_code
+       AND dc.kelurahan = loc.kelurahan_code
+)
+
 SELECT 
     dfs.source_schema,
     dfs._airbyte_extracted_at,
@@ -53,28 +76,22 @@ SELECT
     dfs.hselasa,
 
     -- Customer & Location Details
-    dc.cust_nm,
-    loc.provinsi_code,
-    loc.provinsi_name,
-    loc.kabupaten_code,
-    loc.kabupaten_name,
-    loc.kecamatan_code,
-    loc.kecamatan_name,
-    loc.kelurahan_code,
-    loc.kelurahan_name,
-    dc.latitude,
-    dc.longitude
+    cwl.cust_nm,
+    cwl.provinsi_code,
+    cwl.provinsi_name,
+    cwl.kabupaten_code,
+    cwl.kabupaten_name,
+    cwl.kecamatan_code,
+    cwl.kecamatan_name,
+    cwl.kelurahan_code,
+    cwl.kelurahan_name,
+    cwl.latitude,
+    cwl.longitude
 FROM {{ ref('stg_fcustsls') }} dfs
 LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND dfs.source_schema = mmgs.source_schema
-LEFT JOIN bift.dim_customer dc 
-    ON dc.distributor_id = dfs.distributor_id 
-   AND dc.cust_id = dfs.cust_id 
-LEFT JOIN bift.dim_lokasi loc
-    ON dc.provinsi = loc.provinsi_code
-   AND dc.kabupaten = loc.kabupaten_code
-   AND dc.kecamatan = loc.kecamatan_code
-   AND dc.kelurahan = loc.kelurahan_code
-WHERE dfs.flag_aktif = 'Y' 
-  AND dfs.salesforce_id NOT IN ('999', '116', '213', '222')
+LEFT JOIN customer_with_location cwl
+    ON dfs.distributor_id = cwl.distributor_id 
+   AND dfs.cust_id = cwl.cust_id
+

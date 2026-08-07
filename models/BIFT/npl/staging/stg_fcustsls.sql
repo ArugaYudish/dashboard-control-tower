@@ -4,7 +4,7 @@
     )
 }}
 
-WITH combined_staging AS (
+WITH m1_staging AS (
     SELECT 
         'm1' AS source_schema,
         f.*,
@@ -14,9 +14,9 @@ WITH combined_staging AS (
     FROM raw_ficom_m1.v_fcustsls_staging f
     INNER JOIN raw_ficom_m1.m_group_channels gc
             ON f.channel_id = gc.channel_id
+),
 
-    UNION ALL
-
+m2_staging AS (
     SELECT 
         'm2' AS source_schema,
         f.*,
@@ -26,9 +26,9 @@ WITH combined_staging AS (
     FROM raw_ficom_m2.v_fcustsls_staging f
     INNER JOIN raw_ficom_m2.m_group_channels gc
             ON f.channel_id = gc.channel_id
+),
 
-    UNION ALL
-
+m3_staging AS (
     SELECT 
         'm3' AS source_schema,
         f.*,
@@ -38,6 +38,14 @@ WITH combined_staging AS (
     FROM raw_ficom_m3.v_fcustsls_staging f
     INNER JOIN raw_ficom_m3.m_group_channels gc
             ON f.channel_id = gc.channel_id
+),
+
+combined_staging AS (
+    SELECT * FROM m1_staging
+    UNION ALL
+    SELECT * FROM m2_staging
+    UNION ALL
+    SELECT * FROM m3_staging
 ),
 
 staging_with_max_date AS (
