@@ -4,8 +4,9 @@
         materialized='table',
         alias='dim_fcustsls_staging',
         pre_hook=[
-            "set local work_mem = '512MB'",
-            "set local maintenance_work_mem = '1GB'"
+            "set local work_mem = '2GB'",
+            "set local maintenance_work_mem = '4GB'",
+            "set local max_parallel_workers_per_gather = 4"
         ],
         indexes=[
           {'columns': ['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'], 'type': 'btree'},
