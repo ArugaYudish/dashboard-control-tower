@@ -21,11 +21,12 @@ SELECT
     sum(inv_val)                   AS "Omset By Val",
     round(sum(qty_carton), 2)      AS "Omset By Qty"
 
-FROM default.gold_npl_outlet_detail
+FROM default.gold_npl_outlet_detail_dev
 WHERE is_transaction = 1
   [[ AND {{tahun}} ]]
   [[ AND {{periodes}} ]]
   [[ AND {{weeks}} ]]
+  [[ AND {{gdiv_ids}} ]]
   [[ AND {{sd_ids}} ]]
   [[ AND {{nsm_ids}} ]]
   [[ AND {{grsm_ids}} ]]

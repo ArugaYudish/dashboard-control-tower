@@ -24,11 +24,12 @@ WITH outlet_stats AS (
 
         max(is_transaction)            AS is_tx
 
-    FROM default.gold_npl_outlet_detail
+    FROM default.gold_npl_outlet_detail_dev
     WHERE 1=1
       [[ AND {{tahun}} ]]
       [[ AND {{periodes}} ]]
       [[ AND {{weeks}} ]]
+      [[ AND {{gdiv_ids}} ]]
       [[ AND {{sd_ids}} ]]
       [[ AND {{nsm_ids}} ]]
       [[ AND {{grsm_ids}} ]]
