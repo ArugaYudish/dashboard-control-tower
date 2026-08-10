@@ -75,12 +75,29 @@ cte_target_call AS (
     FROM raw_ficom_m3.m_nmrc_subdetail tc
     JOIN active_hierarchy ah ON tc.distributor_id::varchar = ah.distributor_id AND tc.sls_id::varchar = ah.sls_id
     GROUP BY tc.distributor_id, tc.sls_id, tc.tgl
+),
+
+-- 4. KONSOLIDASI POPULASI OUTLET (CB + OUTLET REALISASI DARI DASHBOARD)
+cte_all_outlets AS (
+    -- Toko dari CB
+    SELECT 
+        distributor_id, sls_id, outlet_id, year, period, channel_id, salesforce_id,
+        1 AS is_cb_active
+    FROM cte_cb_dedup
+    
+    UNION
+    
+    -- Toko dari Realisasi Transaksi/IR (jika ada yang tidak terdaftar di CB)
+    SELECT DISTINCT 
+        distributor_id, sls_id, outlet_id, year, period, group_channel_id AS channel_id, salesforce_id,
+        0 AS is_cb_active
+    FROM {{ ref('gold_grading_dashboard') }}
 )
 
--- MAIN FLAT MODEL SUMMARY VIA LEFT JOIN
+-- MAIN FLAT MODEL SUMMARY
 SELECT 
-    cb.year,
-    cb.period,
+    COALESCE(act.year, o.year) AS year,
+    COALESCE(act.period, o.period) AS period,
     COALESCE(act.week, 0) AS week,
     act.report_date,
     
@@ -90,12 +107,12 @@ SELECT
     ah.grsm_id, ah.grsm_nm,
     ah.rsm_id, ah.rsm_nm,
     ah.ss_id, ah.ss_nm,
-    cb.sls_id, ah.sls_nm,
-    cb.distributor_id, ah.distributor_nm,
-    cb.outlet_id,
+    o.sls_id, ah.sls_nm,
+    o.distributor_id, ah.distributor_nm,
+    o.outlet_id,
     
     -- SALESFORCE & CHANNEL
-    COALESCE(act.salesforce_id, cb.salesforce_id) AS salesforce_id,
+    COALESCE(act.salesforce_id, o.salesforce_id) AS salesforce_id,
     COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
     COALESCE(mgc.gsalesforce_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
     COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
@@ -109,35 +126,35 @@ SELECT
     act.grade,
     
     -- ANCHOR METRICS & METRIK REALISASI
-    1 AS is_cb_active,
+    o.is_cb_active,
     COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
     COALESCE(act.inv_qty, 0) AS inv_qty,
     COALESCE(act.inv_val, 0) AS inv_val,
     COALESCE(act.facing_qty, 0) AS facing_qty,
     CASE WHEN act.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_visited
 
-FROM cte_cb_dedup cb
+FROM cte_all_outlets o
 
 -- JOIN 1: HIERARKI PENJUALAN M3 AKTIF
 JOIN active_hierarchy ah 
-    ON cb.distributor_id = ah.distributor_id 
-   AND cb.sls_id = ah.sls_id
+    ON o.distributor_id = ah.distributor_id 
+   AND o.sls_id = ah.sls_id
 
 -- JOIN 2: REALISASI TRANSAKSI SALES SFA & IR HARIAN PER ITEM
 LEFT JOIN {{ ref('gold_grading_dashboard') }} act
-    ON cb.distributor_id = act.distributor_id
-   AND cb.outlet_id = act.outlet_id
-   AND cb.year = act.year
-   AND cb.period = act.period
+    ON o.distributor_id = act.distributor_id
+   AND o.outlet_id = act.outlet_id
+   AND o.year = act.year
+   AND o.period = act.period
 
 -- JOIN 3: TARGET CALL HARIAN
 LEFT JOIN cte_target_call tc
-    ON cb.distributor_id = tc.distributor_id
-   AND cb.sls_id = tc.sls_id
+    ON o.distributor_id = tc.distributor_id
+   AND o.sls_id = tc.sls_id
    AND act.report_date = tc.report_date
 
 -- JOIN 4: MASTER MAPPING
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON COALESCE(act.salesforce_id, cb.salesforce_id) = mgc.salesforce_id::varchar
+    ON COALESCE(act.salesforce_id, o.salesforce_id) = mgc.salesforce_id::varchar
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
-    ON cb.channel_id = mcs.channel_id::varchar
+    ON o.channel_id = mcs.channel_id::varchar
