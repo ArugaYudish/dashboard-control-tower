@@ -1,49 +1,52 @@
 {{ config(
-    materialized='table'
+    materialized='view'
 ) }}
 
 -- Grain: one row per (sales_date, channel, product-group, distributor_id).
--- Source moved from silver_sales_performance (pcode grain) to
--- silver_sales_performance_parent, whose smallest product key is the product group
--- (div_id, brand_id, subbrand_id, parent_id, flag_season) surfaced as pg_id -- so pcode
--- and pcodename are gone. A parent whose SKUs span several subbrands still yields one row
--- per group, with each group carrying its own share of the metrics, so sums stay exact at
--- parent level. target_qty/target_value only exist at parent grain upstream and are pinned
--- to one designated group per parent (NULL on the others) -- sum them, never average.
+--
+-- This is the daily SHELL, not a shim. A real daily source is coming at exactly this
+-- grain and backfilled to history; when it lands it drops in here and nothing outside
+-- this file moves. The contract is fixed across all three stages: same name, same grain,
+-- same columns including daily_is_estimated. The service only ever asks for one
+-- (year, week).
+--
+--   Stage 1 (now)      view over the weekly table x m_cycle3, / n_days, flag true
+--   Stage 2 (arriving) table: real rows UNION ALL derived rows for weeks not yet
+--                      covered, flag per row
+--   Stage 3 (done)     passthrough of the real source, derived branch deleted
+--
+-- The moment this stops being a view it is ~61M rows and the report reads one week
+-- (~590K rows). Partition by year and index (year, week) AT THAT MOMENT, not later --
+-- an unindexed 18 GB heap is exactly the problem this tiering removes.
+--
+-- ALWAYS FILTER BY WEEK. Unfiltered, this view reproduces all ~61M rows; it is a
+-- one-week read path (the M-0 current-week block), not a scan target.
+--
+-- The division is arithmetic, not data: every day in a week shows weekly/n_days, hence
+-- daily_is_estimated = true. That flips per row at stage 2 and to false at stage 3.
 
-with week_days as (                       -- divisor: how many days in each (year, week)
-    select year, week, count(*) as n_days
-    from spx.m_cycle3
-    group by year, week
-),
-days as (                                 -- row-multiplier: one row per calendar day
+with days as (                            -- row-multiplier: one row per calendar day
     select year, week, cdate::date as sales_date
     from spx.m_cycle3
 )
 select
-    d.sales_date,                         -- NEW daily grain (from m_cycle3)
-    s.year, s.period, s.periodname, s.week,
-    s.channel,
+    d.sales_date,                         -- daily grain (from m_cycle3)
+    w.year, w.period, w.periodname, w.week,
+    w.channel,
     -- org hierarchy
-    s.nsm_id, s.nsm_name, s.grsm_id, s.grsm_name,
-    s.rsm_id, s.rsm_name, s.ss_id, s.ss_name,
+    w.nsm_id, w.nsm_name, w.grsm_id, w.grsm_name,
+    w.rsm_id, w.rsm_name, w.ss_id, w.ss_name,
     -- product hierarchy (sbu_id == division id)
-    s.sbu_id, s.sbu_name,
-    dv.div_nm                       as division_name,
-    coalesce(dg.m_group, 'UNMAPPED') as division_group,   -- 11 Industrial etc. -> visible, not dropped
-    s.brand_id, s.brand_name, s.subbrand_id, s.subbrand_name,
-    s.parent_id, s.parent_name, s.flag_sku,
-    s.pg_id,                              -- product-group surrogate: the new smallest product key
-    s.distributor_id, s.distributor_name,
+    w.sbu_id, w.sbu_name, w.division_name, w.division_group,
+    w.brand_id, w.brand_name, w.subbrand_id, w.subbrand_name,
+    w.parent_id, w.parent_name, w.flag_sku, w.pg_id,
+    w.distributor_id, w.distributor_name,
     -- additive flows split evenly across the week's days
-    s.stm_qty      / wd.n_days      as stm_qty,
-    s.stm_value    / wd.n_days      as stm_value,
-    s.target_qty   / wd.n_days      as target_qty,
-    s.target_value / wd.n_days      as target_value,     -- feeds the Achievement cards (stm/target)
-    true                            as daily_is_estimated,  -- guardrail: flip false when real daily lands
-    current_timestamp               as loaded_at
-from spx.silver_sales_performance_parent s
-join week_days wd on wd.year = s.year and wd.week = s.week
-join days     d  on d.year  = s.year and d.week  = s.week   -- expands 1 weekly row -> n_days rows
-left join spx.m_division dv on dv.div_id = s.sbu_id
-left join {{ ref('division_group_map') }} dg on dg.div_id = s.sbu_id::varchar
+    w.stm_qty      / w.n_days as stm_qty,
+    w.stm_value    / w.n_days as stm_value,
+    w.target_qty   / w.n_days as target_qty,
+    w.target_value / w.n_days as target_value,   -- feeds the Achievement cards (stm/target)
+    true                      as daily_is_estimated,  -- guardrail: per-row at stage 2, false at stage 3
+    w.loaded_at
+from {{ ref('gold_sales_performance_weekly') }} w
+join days d on d.year = w.year and d.week = w.week   -- expands 1 weekly row -> n_days rows
