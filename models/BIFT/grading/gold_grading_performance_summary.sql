@@ -5,7 +5,7 @@
             {'columns': ['year', 'period', 'week']},
             {'columns': ['report_date']},
             {'columns': ['sd_id', 'nsm_id', 'grsm_id', 'rsm_id', 'ss_id']},
-            {'columns': ['distributor_id', 'sls_id']},
+            {'columns': ['distributor_id', 'sls_id', 'outlet_id']},
             {'columns': ['subbrand_id']},
             {'columns': ['gsalesforce_id']},
             {'columns': ['group_channel_id']}
@@ -14,7 +14,7 @@
 }}
 
 WITH 
--- 1. ANCHOR HIERARKI SALESMAN M3 (EMPLOYEE AKTIF)
+-- 1. HIERARKI SALESMAN M3 (EMPLOYEE AKTIF)
 active_hierarchy AS (
     SELECT DISTINCT 
         a.sd_id, a.sd_nm,
@@ -34,7 +34,7 @@ active_hierarchy AS (
     WHERE b.terminate_date IS NULL
 ),
 
--- 2. SLICE 1: CUSTOMER BASE BULANAN (LOCK 1 TOKO UNIK PER DISTRIBUTOR & SALESMAN HIERARKI)
+-- 2. BASELINE CUSTOMER BASE (1 TOKO UNIK PER DISTRIBUTOR & SALESMAN PER BULAN)
 cte_cb_snapshot AS (
     SELECT 
         st.distributor_id::varchar AS distributor_id,
@@ -42,6 +42,8 @@ cte_cb_snapshot AS (
         st.cust_id::varchar AS cust_id,
         st.periode::int AS period,
         st.tahun::int AS year,
+        st.channel_id::varchar AS channel_id,
+        st.salesforce_id::varchar AS salesforce_id,
         st.upd_date,
         MAX(st.upd_date) OVER (PARTITION BY st.distributor_id::varchar, st.tahun, st.periode) AS upd_date_terakhir
     FROM raw_ficom_m3.v_fcustsls_staging st
@@ -53,111 +55,89 @@ cte_cb_dedup AS (
     SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.year, s.period)
         s.distributor_id, 
         s.sls_id, 
-        s.cust_id, 
+        s.cust_id AS outlet_id, 
         s.year, 
-        s.period
+        s.period,
+        s.channel_id,
+        s.salesforce_id
     FROM cte_cb_snapshot s
     WHERE s.upd_date = s.upd_date_terakhir
     ORDER BY s.distributor_id, s.cust_id, s.year, s.period DESC, s.upd_date DESC
 ),
-summary_cb AS (
-    SELECT 
-        cb.year,
-        cb.period,
-        0 AS week,
-        NULL::date AS report_date,
-        
-        ah.sd_id, ah.sd_nm,
-        ah.nsm_id, ah.nsm_nm,
-        ah.grsm_id, ah.grsm_nm,
-        ah.rsm_id, ah.rsm_nm,
-        ah.ss_id, ah.ss_nm,
-        cb.sls_id, ah.sls_nm,
-        cb.distributor_id, ah.distributor_nm,
-        
-        'ALL_SUBBRAND' AS subbrand_id, 'ALL_SUBBRAND' AS subbrand_nm,
-        'N/A' AS salesforce_id, 'N/A' AS gsalesforce_id, 'N/A' AS gsalesforce_nm,
-        'N/A' AS group_channel_id, 'N/A' AS group_channel_nm,
-        
-        COUNT(DISTINCT cb.cust_id) AS cb_count,
-        0 AS tgt_call,
-        0 AS oa_count, 0 AS grade_a_count, 0 AS grade_b_count, 0 AS grade_c_count, 0 AS non_grade_count,
-        0 AS total_inv_qty, 0 AS total_inv_val
-    FROM cte_cb_dedup cb
-    JOIN active_hierarchy ah ON cb.distributor_id = ah.distributor_id AND cb.sls_id = ah.sls_id
-    GROUP BY 
-        cb.year, cb.period, cb.distributor_id, cb.sls_id,
-        ah.sd_id, ah.sd_nm, ah.nsm_id, ah.nsm_nm, ah.grsm_id, ah.grsm_nm, 
-        ah.rsm_id, ah.rsm_nm, ah.ss_id, ah.ss_nm, ah.sls_nm, ah.distributor_nm
-),
 
--- 3. SLICE 2: TARGET CALL HARIAN (KPL MURNI HIERARKI AKTIF)
-summary_tc AS (
+-- 3. TARGET CALL HARIAN (KPL)
+cte_target_call AS (
     SELECT 
-        tc.tahun::int AS year,
-        tc.periode::int AS period,
-        tc.week::int AS week,
+        tc.distributor_id::varchar AS distributor_id,
+        tc.sls_id::varchar AS sls_id,
         tc.tgl::date AS report_date,
-        
-        ah.sd_id, ah.sd_nm,
-        ah.nsm_id, ah.nsm_nm,
-        ah.grsm_id, ah.grsm_nm,
-        ah.rsm_id, ah.rsm_nm,
-        ah.ss_id, ah.ss_nm,
-        tc.sls_id::varchar AS sls_id, ah.sls_nm,
-        tc.distributor_id::varchar AS distributor_id, ah.distributor_nm,
-        
-        'ALL_SUBBRAND' AS subbrand_id, 'ALL_SUBBRAND' AS subbrand_nm,
-        'N/A' AS salesforce_id, 'N/A' AS gsalesforce_id, 'N/A' AS gsalesforce_nm,
-        'N/A' AS group_channel_id, 'N/A' AS group_channel_nm,
-        
-        0 AS cb_count,
-        SUM(tc.tgt_call::int) AS tgt_call,
-        0 AS oa_count, 0 AS grade_a_count, 0 AS grade_b_count, 0 AS grade_c_count, 0 AS non_grade_count,
-        0 AS total_inv_qty, 0 AS total_inv_val
+        SUM(tc.tgt_call::int) AS tgt_call_daily
     FROM raw_ficom_m3.m_nmrc_subdetail tc
     JOIN active_hierarchy ah ON tc.distributor_id::varchar = ah.distributor_id AND tc.sls_id::varchar = ah.sls_id
-    GROUP BY 
-        tc.tahun, tc.periode, tc.week, tc.tgl, tc.distributor_id, tc.sls_id,
-        ah.sd_id, ah.sd_nm, ah.nsm_id, ah.nsm_nm, ah.grsm_id, ah.grsm_nm, 
-        ah.rsm_id, ah.rsm_nm, ah.ss_id, ah.ss_nm, ah.sls_nm, ah.distributor_nm
-),
-
--- 4. SLICE 3: ACTUAL ACTIVITY & GRADING (DARI MODEL DETAIL DASHBOARD)
-summary_act AS (
-    SELECT 
-        g.year,
-        g.period,
-        g.week,
-        g.report_date,
-        
-        g.sd_id, g.sd_nm, g.nsm_id, g.nsm_nm, g.grsm_id, g.grsm_nm, g.rsm_id, g.rsm_nm, g.ss_id, g.ss_nm,
-        g.sls_id, g.sls_nm, g.distributor_id, g.distributor_nm,
-        
-        g.subbrand_id, g.subbrand_nm,
-        g.salesforce_id, g.gsalesforce_id, g.gsalesforce_nm,
-        g.group_channel_id, g.group_channel_nm,
-        
-        0 AS cb_count,
-        0 AS tgt_call,
-        COUNT(DISTINCT g.outlet_id) AS oa_count,
-        COUNT(DISTINCT CASE WHEN g.grade = 'A' THEN g.outlet_id END) AS grade_a_count,
-        COUNT(DISTINCT CASE WHEN g.grade = 'B' THEN g.outlet_id END) AS grade_b_count,
-        COUNT(DISTINCT CASE WHEN g.grade = 'C' THEN g.outlet_id END) AS grade_c_count,
-        COUNT(DISTINCT CASE WHEN g.grade NOT IN ('A', 'B', 'C') OR g.grade IS NULL THEN g.outlet_id END) AS non_grade_count,
-        SUM(g.inv_qty) AS total_inv_qty,
-        SUM(g.inv_val) AS total_inv_val
-    FROM {{ ref('gold_grading_dashboard') }} g
-    GROUP BY 
-        g.year, g.period, g.week, g.report_date,
-        g.sd_id, g.sd_nm, g.nsm_id, g.nsm_nm, g.grsm_id, g.grsm_nm, g.rsm_id, g.rsm_nm, g.ss_id, g.ss_nm,
-        g.sls_id, g.sls_nm, g.distributor_id, g.distributor_nm,
-        g.subbrand_id, g.subbrand_nm, g.salesforce_id, g.gsalesforce_id, g.gsalesforce_nm, g.group_channel_id, g.group_channel_nm
+    GROUP BY tc.distributor_id, tc.sls_id, tc.tgl
 )
 
--- COMBINE SEMUA SLICE
-SELECT * FROM summary_cb
-UNION ALL
-SELECT * FROM summary_tc
-UNION ALL
-SELECT * FROM summary_act
+-- MAIN FLAT MODEL SUMMARY VIA LEFT JOIN
+SELECT 
+    cb.year,
+    cb.period,
+    COALESCE(act.week, 0) AS week,
+    act.report_date,
+    
+    -- HIERARKI PENJUALAN M3
+    ah.sd_id, ah.sd_nm,
+    ah.nsm_id, ah.nsm_nm,
+    ah.grsm_id, ah.grsm_nm,
+    ah.rsm_id, ah.rsm_nm,
+    ah.ss_id, ah.ss_nm,
+    cb.sls_id, ah.sls_nm,
+    cb.distributor_id, ah.distributor_nm,
+    cb.outlet_id,
+    
+    -- SALESFORCE & CHANNEL
+    COALESCE(act.salesforce_id, cb.salesforce_id) AS salesforce_id,
+    COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
+    COALESCE(mgc.gsalesforce_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
+    COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
+    COALESCE(mcs.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
+    
+    -- PRODUK & REALISASI (DARI FACT DETAIL)
+    COALESCE(act.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
+    COALESCE(act.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
+    act.pcode,
+    act.pcode_nm,
+    act.grade,
+    
+    -- ANCHOR METRICS & METRIK REALISASI
+    1 AS is_cb_active,
+    COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
+    COALESCE(act.inv_qty, 0) AS inv_qty,
+    COALESCE(act.inv_val, 0) AS inv_val,
+    COALESCE(act.facing_qty, 0) AS facing_qty,
+    CASE WHEN act.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_visited
+
+FROM cte_cb_dedup cb
+
+-- JOIN 1: HIERARKI PENJUALAN M3 AKTIF
+JOIN active_hierarchy ah 
+    ON cb.distributor_id = ah.distributor_id 
+   AND cb.sls_id = ah.sls_id
+
+-- JOIN 2: REALISASI TRANSAKSI SALES SFA & IR HARIAN PER ITEM
+LEFT JOIN {{ ref('gold_grading_dashboard') }} act
+    ON cb.distributor_id = act.distributor_id
+   AND cb.outlet_id = act.outlet_id
+   AND cb.year = act.year
+   AND cb.period = act.period
+
+-- JOIN 3: TARGET CALL HARIAN
+LEFT JOIN cte_target_call tc
+    ON cb.distributor_id = tc.distributor_id
+   AND cb.sls_id = tc.sls_id
+   AND act.report_date = tc.report_date
+
+-- JOIN 4: MASTER MAPPING
+LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
+    ON COALESCE(act.salesforce_id, cb.salesforce_id) = mgc.salesforce_id::varchar
+LEFT JOIN raw_ficom_m3.m_group_channels mcs 
+    ON cb.channel_id = mcs.channel_id::varchar
