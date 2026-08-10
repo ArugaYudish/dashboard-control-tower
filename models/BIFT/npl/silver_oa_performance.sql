@@ -32,17 +32,16 @@
 --            LEFT JOIN vfsales_det (sts='905') — week_prd/week_no used directly
 --            LEFT JOIN dim_product (product hierarchy + carton conversion)
 --
--- Filters  : tahun       = var('tahun', 2026)        [CB Cover + trx]
---            gdiv_id     = var('gdiv_id', '10')       [salesman hierarchy]
+-- Filters  : tahun = var('tahun', 2026)   [CB Cover + trx]
 -- =============================================================================
 
 WITH
 
 -- ---------------------------------------------------------------------------
--- STEP 1 : CB Cover — covered outlets for a given tahun, filtered by gdiv_id.
+-- STEP 1 : CB Cover — covered outlets for a given tahun, all gdiv/schemas.
 --          Enriched with full salesman hierarchy via INNER JOIN.
 --          Join key: distributor_id + sls_id + source_schema.
---          Vars : gdiv_id (default '10'), tahun (default 2026).
+--          Var  : tahun (default 2026).
 -- ---------------------------------------------------------------------------
 cb_cover AS (
     SELECT
@@ -103,11 +102,7 @@ cb_cover AS (
         sh.opr_type
 
     FROM bift.dim_fcustsls_staging cs
-    INNER JOIN (
-        SELECT *
-        FROM bift.dim_salesman_hierarchy
-        WHERE gdiv_id = '{{ var("gdiv_id", "10") }}'
-    ) sh
+    INNER JOIN bift.dim_salesman_hierarchy sh
             ON cs.distributor_id = sh.distributor_id
            AND cs.sls_id         = sh.sls_id
            AND cs.source_schema  = sh.source_schema
