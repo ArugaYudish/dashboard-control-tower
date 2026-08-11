@@ -15,57 +15,55 @@
 }}
 
 WITH 
--- 1. HIERARKI SALESMAN M3 (EMPLOYEE AKTIF)
-active_hierarchy AS (
-    SELECT DISTINCT 
-        a.sd_id, a.sd_nm,
-        a.nsm_id, a.nsm_nm,
-        a.grsm_id, a.grsm_nm,
-        a.rsm_id, a.rsm_nm,
-        a.ss_id, a.ss_nm,
-        c.sls_id::varchar AS sls_id,
-        COALESCE(ms.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
-        c.distributor_id::varchar AS distributor_id,
-        COALESCE(md.distributor_nm, 'UNKNOWN') AS distributor_nm
-    FROM raw_ficom_m3.v_salesman_hierarchy a
-    JOIN raw_ficom_m3.m_employee b ON a.ss_id = b.emp_id
-    JOIN raw_ficom_m3.m_salesman_spv c ON c.sls_id = a.sls_id AND c.distributor_id = a.distributor_id
-    LEFT JOIN raw_ficom_m3.m_salesman ms ON c.distributor_id = ms.distributor_id AND c.sls_id = ms.sls_id
-    LEFT JOIN raw_ficom_m3.m_distributor md ON c.distributor_id = md.distributor_id
-    WHERE b.terminate_date IS NULL
-),
-
--- 2. BASELINE CUSTOMER BASE (DEDUP 1 TOKO PER DISTRIBUTOR & SALESMAN PER BULAN)
-cte_cb_snapshot AS (
+-- 1. BASELINE DARi SILVER OA PERFORMANCE (DEDUP ATRIBUT KUNCI)
+cte_silver AS (
     SELECT 
-        st.distributor_id::varchar AS distributor_id,
-        st.sls_id::varchar AS sls_id,
-        st.cust_id::varchar AS cust_id,
-        st.periode::int AS period,
-        st.tahun::int AS year,
-        st.channel_id::varchar AS channel_id,
-        st.salesforce_id::varchar AS salesforce_id,
-        st.upd_date,
-        MAX(st.upd_date) OVER (PARTITION BY st.distributor_id::varchar, st.tahun, st.periode) AS upd_date_terakhir
-    FROM raw_ficom_m3.v_fcustsls_staging st
-    WHERE st.flag_aktif = 'Y'
-      AND st.salesforce_id::varchar NOT IN ('999', '116', '213', '222')
-),
-cte_cb_dedup AS (
-    SELECT DISTINCT ON (s.distributor_id, s.cust_id, s.year, s.period)
-        s.distributor_id, 
-        s.sls_id, 
-        s.cust_id AS outlet_id, 
-        s.year, 
-        s.period,
-        s.channel_id,
-        s.salesforce_id
-    FROM cte_cb_snapshot s
-    WHERE s.upd_date = s.upd_date_terakhir
-    ORDER BY s.distributor_id, s.cust_id, s.year, s.period DESC, s.upd_date DESC
+        s.tahun::int AS year,
+        s.periode::int AS period,
+        s.week::int AS week,
+        s.date AS report_date,
+        
+        -- HIERARKI M3
+        COALESCE(s.sd_id, 'UNMAPPED') AS sd_id,
+        COALESCE(s.sd_nm, 'UNMAPPED') AS sd_nm,
+        COALESCE(s.nsm_id, 'UNMAPPED') AS nsm_id,
+        COALESCE(s.nsm_nm, 'UNMAPPED') AS nsm_nm,
+        COALESCE(s.grsm_id, 'UNMAPPED') AS grsm_id,
+        COALESCE(s.grsm_nm, 'UNMAPPED') AS grsm_nm,
+        COALESCE(s.rsm_id, 'UNMAPPED') AS rsm_id,
+        COALESCE(s.rsm_nm, 'UNMAPPED') AS rsm_nm,
+        COALESCE(s.ss_id, 'UNMAPPED') AS ss_id,
+        COALESCE(s.ss_nm, 'UNMAPPED') AS ss_nm,
+        s.distributor_id::varchar AS distributor_id,
+        COALESCE(s.distributor_nm, 'UNKNOWN') AS distributor_nm,
+        s.sls_id::varchar AS sls_id,
+        COALESCE(s.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
+        s.cust_id::varchar AS outlet_id,
+        
+        -- SALESFORCE & CHANNEL
+        COALESCE(s.salesforce_id, 'N/A') AS salesforce_id,
+        COALESCE(s.gsalesforce2_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
+        COALESCE(s.gsalesforce2_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
+        COALESCE(s.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
+        COALESCE(s.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
+        
+        -- PRODUK
+        COALESCE(s.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
+        COALESCE(s.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
+        COALESCE(s.pcode, 'NO_PCODE') AS pcode,
+        COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
+        
+        -- METRICS TRANSAKSI MURNI SILVER
+        COALESCE(s.inv_qty, 0) AS inv_qty,
+        COALESCE(s.inv_val, 0) AS inv_val,
+        
+        -- FLAG CB & OA (IS_TRANSACTION 1 = OA, 0 = HANYA CB STAGING)
+        1 AS is_cb_active,
+        CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_visited
+    FROM bift.silver_oa_performance s
 ),
 
--- 3. TARGET CALL HARIAN (KPL)
+-- 2. TARGET CALL HARIAN (KPL)
 cte_target_call AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
@@ -76,105 +74,70 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 4. PRE-AGGREGATION DARI DASHBOARD DULU (MENCEGAH DUPLIKASI DIPROSES DI MEMORI)
-cte_act_pcode AS (
+-- 3. GRADE & FACING IR DARI DASHBOARD DETAIL
+cte_grading AS (
     SELECT 
-        year, period, COALESCE(week, 0) AS week, report_date,
-        distributor_id, sls_id, outlet_id,
-        subbrand_id, subbrand_nm, pcode, pcode_nm,
-        salesforce_id, group_channel_id, group_channel_nm,
+        year, period, report_date,
+        distributor_id, sls_id, outlet_id, pcode,
         MAX(grade) AS grade,
-        SUM(inv_qty) AS inv_qty,
-        SUM(inv_val) AS inv_val,
         SUM(facing_qty) AS facing_qty
     FROM {{ ref('gold_grading_dashboard') }}
-    GROUP BY 
-        year, period, COALESCE(week, 0), report_date,
-        distributor_id, sls_id, outlet_id,
-        subbrand_id, subbrand_nm, pcode, pcode_nm,
-        salesforce_id, group_channel_id, group_channel_nm
-),
-
--- 5. KONSOLIDASI SELURUH POPULASI TOKO (CB + REALISASI UNMAPPED)
-cte_all_outlets AS (
-    SELECT 
-        distributor_id, sls_id, outlet_id, year, period, channel_id, salesforce_id,
-        1 AS is_cb_active
-    FROM cte_cb_dedup
-    
-    UNION
-    
-    SELECT DISTINCT 
-        distributor_id, sls_id, outlet_id, year, period, group_channel_id AS channel_id, salesforce_id,
-        0 AS is_cb_active
-    FROM cte_act_pcode
+    GROUP BY year, period, report_date, distributor_id, sls_id, outlet_id, pcode
 )
 
 -- MAIN MODEL FINAL
 SELECT 
-    o.year,
-    o.period,
-    COALESCE(act.week, 0) AS week,
-    act.report_date,
+    s.year,
+    s.period,
+    s.week,
+    s.report_date,
     
     -- HIERARKI PENJUALAN M3
-    COALESCE(ah.sd_id, 'UNMAPPED') AS sd_id, 
-    COALESCE(ah.sd_nm, 'UNMAPPED') AS sd_nm,
-    COALESCE(ah.nsm_id, 'UNMAPPED') AS nsm_id, 
-    COALESCE(ah.nsm_nm, 'UNMAPPED') AS nsm_nm,
-    COALESCE(ah.grsm_id, 'UNMAPPED') AS grsm_id, 
-    COALESCE(ah.grsm_nm, 'UNMAPPED') AS grsm_nm,
-    COALESCE(ah.rsm_id, 'UNMAPPED') AS rsm_id, 
-    COALESCE(ah.rsm_nm, 'UNMAPPED') AS rsm_nm,
-    COALESCE(ah.ss_id, 'UNMAPPED') AS ss_id, 
-    COALESCE(ah.ss_nm, 'UNMAPPED') AS ss_nm,
-    o.sls_id, 
-    COALESCE(ah.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
-    o.distributor_id, 
-    COALESCE(ah.distributor_nm, 'UNKNOWN') AS distributor_nm,
-    o.outlet_id,
+    s.sd_id, s.sd_nm,
+    s.nsm_id, s.nsm_nm,
+    s.grsm_id, s.grsm_nm,
+    s.rsm_id, s.rsm_nm,
+    s.ss_id, s.ss_nm,
+    s.sls_id, s.sls_nm,
+    s.distributor_id, s.distributor_nm,
+    s.outlet_id,
     
     -- SALESFORCE & CHANNEL
-    COALESCE(act.salesforce_id, o.salesforce_id) AS salesforce_id,
-    COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
-    COALESCE(mgc.gsalesforce_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
-    COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
-    COALESCE(mcs.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
+    s.salesforce_id,
+    s.gsalesforce_id,
+    s.gsalesforce_nm,
+    s.group_channel_id,
+    s.group_channel_nm,
     
-    -- PRODUK & REALISASI (PCODE LEVEL)
-    COALESCE(act.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
-    COALESCE(act.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
-    COALESCE(act.pcode, 'NO_PCODE') AS pcode,
-    COALESCE(act.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
-    act.grade,
+    -- PRODUK & GRADE
+    s.subbrand_id,
+    s.subbrand_nm,
+    s.pcode,
+    s.pcode_nm,
+    g.grade,
     
     -- METRICS
-    o.is_cb_active,
+    s.is_cb_active,
     COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
-    COALESCE(act.inv_qty, 0) AS inv_qty,
-    COALESCE(act.inv_val, 0) AS inv_val,
-    COALESCE(act.facing_qty, 0) AS facing_qty,
-    CASE WHEN act.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_visited
+    s.inv_qty,
+    s.inv_val,
+    COALESCE(g.facing_qty, 0) AS facing_qty,
+    s.is_visited
 
-FROM cte_all_outlets o
+FROM cte_silver s
 
-LEFT JOIN active_hierarchy ah 
-    ON o.distributor_id = ah.distributor_id 
-   AND o.sls_id = ah.sls_id
-
-LEFT JOIN cte_act_pcode act
-    ON o.distributor_id = act.distributor_id
-   AND o.outlet_id = act.outlet_id
-   AND o.year = act.year
-   AND o.period = act.period
-
+-- JOIN TARGET CALL
 LEFT JOIN cte_target_call tc
-    ON o.distributor_id = tc.distributor_id
-   AND o.sls_id = tc.sls_id
-   AND act.report_date = tc.report_date
+    ON s.distributor_id = tc.distributor_id
+   AND s.sls_id = tc.sls_id
+   AND s.report_date = tc.report_date
 
-LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
-    ON COALESCE(act.salesforce_id, o.salesforce_id) = mgc.salesforce_id::varchar
-
-LEFT JOIN raw_ficom_m3.m_group_channels mcs 
-    ON o.channel_id = mcs.channel_id::varchar
+-- JOIN GRADE DISPLAY IR
+LEFT JOIN cte_grading g
+    ON s.distributor_id = g.distributor_id
+   AND s.sls_id = g.sls_id
+   AND s.outlet_id = g.outlet_id
+   AND s.year = g.year
+   AND s.period = g.period
+   AND s.report_date = g.report_date
+   AND s.pcode = g.pcode
