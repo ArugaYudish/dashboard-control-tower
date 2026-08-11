@@ -3,6 +3,7 @@
         materialized = 'table',
         schema = 'spx',
         alias = 'gold_grading_performance_summary',
+        pre_hook = "SET LOCAL work_mem = '512MB';",
         indexes = [
             {'columns': ['year', 'period', 'week']},
             {'columns': ['report_date']},
@@ -80,11 +81,12 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 3. AGGREGATION GRADE DARI GOLD DASHBOARD
+-- 3. AGGREGATION GRADE DARI GOLD DASHBOARD (DIPERBAIKI: TAMBAH TANGGAL VISIT)
 cte_grading_hierarchy AS (
     SELECT 
         year::int AS year, 
         period::int AS period, 
+        visit_date::date AS report_date, -- <--- FIX 1: Tanggal visit IR dipertahankan
         COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
         distributor_id::varchar AS distributor_id, 
         sls_id::varchar AS sls_id,
@@ -93,7 +95,7 @@ cte_grading_hierarchy AS (
         SUM(COALESCE(facing_qty, 0)) AS facing_qty
     FROM {{ ref('gold_grading_dashboard') }}
     WHERE NULLIF(TRIM(grade), '') IS NOT NULL
-    GROUP BY year, period, COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), distributor_id, sls_id, outlet_id
+    GROUP BY year, period, visit_date, COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), distributor_id, sls_id, outlet_id
 )
 
 -- MAIN MODEL FINAL
@@ -101,7 +103,9 @@ SELECT
     s.year,
     s.period,
     s.week,
-    s.report_date,
+    
+    -- FIX 2: Fallback ke tanggal IR (visit_date) jika tanggal dari SFA NULL (non-purchasing rows)
+    COALESCE(s.report_date, g.report_date) AS report_date, 
     
     -- HIERARKI PENJUALAN M3 / DIVISI
     s.gdiv_id, s.gdiv_nm,
@@ -149,9 +153,9 @@ FROM cte_silver s
 LEFT JOIN cte_target_call tc
     ON s.distributor_id = tc.distributor_id
    AND s.sls_id = tc.sls_id
-   AND s.report_date = tc.report_date
+   AND COALESCE(s.report_date, tc.report_date) = tc.report_date
 
--- JOIN 2: GRADE DISPLAY (6 KUNCI KOMPOSIT)
+-- JOIN 2: GRADE DISPLAY (MATCH HARIAN DAHULU, FALLBACK KE PERIODE)
 LEFT JOIN cte_grading_hierarchy g
     ON s.gdiv_id = g.gdiv_id
    AND s.distributor_id = g.distributor_id
@@ -159,3 +163,5 @@ LEFT JOIN cte_grading_hierarchy g
    AND s.outlet_id = g.outlet_id
    AND s.year = g.year
    AND s.period = g.period
+   -- Matching tanggal jika keduanya memiliki tanggal (agar presisi harian)
+   AND (s.report_date = g.report_date OR s.report_date IS NULL)
