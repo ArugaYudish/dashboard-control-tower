@@ -16,7 +16,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 1. MASTER OUTLET & HIERARKI DARI SILVER (PEMBAGI % / DENOMINATOR)
+-- 1. MASTER OUTLET & HIERARKI (SILVER - KEBUTUHAN PERIODE/CB)
 ----------------------------------------------------------------------
 cte_master_outlet_silver AS (
     SELECT DISTINCT
@@ -32,12 +32,38 @@ cte_master_outlet_silver AS (
         distributor_nm,
         cust_id::varchar AS outlet_id,
         cust_nm,
-        kabupaten_name AS city -- 👈 FIX: Ambil dari kabupaten_name di Silver!
+        kabupaten_name AS city
     FROM {{ ref('silver_oa_performance') }}
 ),
 
 ----------------------------------------------------------------------
--- 2. ALL ACTIVITY & IR PCODE DARI GOLD GRADING DASHBOARD (MAIN DATA)
+-- 2. TARGET CALL (NMRC SUBDETAIL) - LEVEL SALESMAN + TANGGAL/WEEK/PERIODE
+----------------------------------------------------------------------
+cte_nmrc_tgt_call AS (
+    SELECT 
+        distributor_id::varchar AS distributor_id,
+        sls_id::varchar AS sls_id,
+        tgl::date AS report_date,
+        tahun::int AS year,
+        periode::int AS period,
+        week::int AS week,
+        SUM(COALESCE(tgt_call::numeric, 0)) AS tgt_call,
+        SUM(COALESCE(tcall_glb::numeric, 0)) AS tcall_glb,
+        SUM(COALESCE(rcall_kpl::numeric, 0)) AS rcall_kpl,
+        SUM(COALESCE(ec_kpl::numeric, 0)) AS ec_kpl
+    FROM raw_ficom_m3.m_nmrc_subdetail
+    WHERE tgl >= '2025-01-01'
+    GROUP BY 
+        distributor_id::varchar,
+        sls_id::varchar,
+        tgl::date,
+        tahun::int,
+        periode::int,
+        week::int
+),
+
+----------------------------------------------------------------------
+-- 3. ALL ACTIVITY & IR PCODE (GOLD GRADING DASHBOARD - MAIN DATA)
 ----------------------------------------------------------------------
 cte_grading_dashboard AS (
     SELECT 
@@ -47,8 +73,8 @@ cte_grading_dashboard AS (
         visit_date::date AS report_date,
         visit_date,
         inv_date,
-        distributor_id::varchar AS distributor_id,
-        outlet_id::varchar AS outlet_id,
+        TRIM(distributor_id::varchar) AS distributor_id,
+        TRIM(outlet_id::varchar) AS outlet_id,
         sls_id::varchar AS sls_id,
         sls_nm,
         pcode::varchar AS pcode,
@@ -73,39 +99,39 @@ cte_grading_dashboard AS (
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY SUMMARY (FULL OUTER JOIN DENGAN MASTER OUTLET)
+-- MAIN QUERY SUMMARY (FULL JOIN MASTER SILVER + GOLD IR + NMRC TGT CALL)
 ----------------------------------------------------------------------
 SELECT 
-    COALESCE(g.year, m.year) AS year,
-    COALESCE(g.period, m.period) AS period,
-    g.week,
+    COALESCE(g.year, s.year, nm.year) AS year,
+    COALESCE(g.period, s.period, nm.period) AS period,
+    COALESCE(g.week, nm.week) AS week,
     
-    -- TANGGAL 100% MURNI DARI GRADING DASHBOARD
-    g.report_date,
+    -- DATES
+    COALESCE(g.report_date, nm.report_date) AS report_date,
     g.visit_date,
     g.inv_date,
     
-    -- HIERARKI & MASTER OUTLET
-    m.sd_id, m.sd_nm,
-    m.nsm_id, m.nsm_nm,
-    m.grsm_id, m.grsm_nm,
-    m.rsm_id, m.rsm_nm,
-    m.ss_id, m.ss_nm,
-    COALESCE(g.distributor_id, m.distributor_id) AS distributor_id,
-    COALESCE(m.distributor_nm, 'UNKNOWN') AS distributor_nm,
-    COALESCE(g.outlet_id, m.outlet_id) AS outlet_id,
-    COALESCE(m.cust_nm, 'UNKNOWN OUTLET') AS cust_nm,
-    m.city,
+    -- HIERARKI & OUTLET
+    s.sd_id, s.sd_nm,
+    s.nsm_id, s.nsm_nm,
+    s.grsm_id, s.grsm_nm,
+    s.rsm_id, s.rsm_nm,
+    s.ss_id, s.ss_nm,
+    COALESCE(g.distributor_id, s.distributor_id, nm.distributor_id) AS distributor_id,
+    COALESCE(s.distributor_nm, 'UNKNOWN') AS distributor_nm,
+    COALESCE(g.outlet_id, s.outlet_id) AS outlet_id,
+    COALESCE(s.cust_nm, 'UNKNOWN OUTLET') AS cust_nm,
+    s.city,
     
-    -- ATRIBUT IR & SALESMAN MURNI DARI GRADING DASHBOARD
-    g.sls_id,
+    -- ATRIBUT IR & SALESMAN
+    COALESCE(g.sls_id, nm.sls_id) AS sls_id,
     g.sls_nm,
     g.pcode,
     g.pcode_nm,
     g.subbrand_id, g.subbrand_nm,
     g.cat_id, g.cat_nm,
     g.salesforce_id, g.salesforce_nm,
-    g.gsalesforce_id, g.gsalesforce_nm,
+    g.gsalesforce_id, gsalesforce_nm,
     g.group_channel_id, g.group_channel_nm,
     g.div_id, g.div_nm,
     
@@ -114,8 +140,14 @@ SELECT
     g.kode_ap,
     COALESCE(g.facing_qty, 0) AS facing_qty,
     
-    -- METRICS KUANTITATIF & FLAGS
-    1 AS is_cb_master,
+    -- 🎯 METRICS PEMBAGI (%) UNTUK METABASE
+    1 AS is_cb_master, -- Dipakai kalau filter PERIODE/BULANAN
+    COALESCE(nm.tgt_call, 0) AS tgt_call_nmrc, -- Dipakai kalau filter DAILY / WEEKLY
+    COALESCE(nm.tcall_glb, 0) AS tcall_glb_nmrc,
+    COALESCE(nm.rcall_kpl, 0) AS rcall_kpl_nmrc,
+    COALESCE(nm.ec_kpl, 0) AS ec_kpl_nmrc,
+    
+    -- PERFORMANCE FLAGS
     COALESCE(g.is_ir_detected, 0) AS is_ir_detected,
     COALESCE(g.inv_qty, 0) AS inv_qty,
     COALESCE(g.inv_val, 0) AS inv_val,
@@ -124,9 +156,15 @@ SELECT
     COALESCE(g.is_ec_avis, 0) AS is_ec_avis,
     COALESCE(g.anomaly_status, '4. No IR & No Sales') AS anomaly_status
 
-FROM cte_master_outlet_silver m
+FROM cte_master_outlet_silver s
 FULL OUTER JOIN cte_grading_dashboard g
-    ON m.distributor_id = g.distributor_id
-   AND m.outlet_id      = g.outlet_id
-   AND m.year           = g.year
-   AND m.period         = g.period
+    ON s.distributor_id = g.distributor_id
+   AND s.outlet_id      = g.outlet_id
+   AND s.year           = g.year
+   AND s.period         = g.period
+LEFT JOIN cte_nmrc_tgt_call nm
+    ON COALESCE(g.distributor_id, s.distributor_id) = nm.distributor_id
+   AND COALESCE(g.sls_id, s.gdiv_id)                = nm.sls_id -- 👈 Terhubung ke Salesman
+   AND COALESCE(g.year, s.year)                     = nm.year
+   AND COALESCE(g.period, s.period)                 = nm.period
+   AND COALESCE(g.report_date, s.year::text)        = nm.report_date::text;
