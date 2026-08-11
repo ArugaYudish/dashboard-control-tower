@@ -8,22 +8,24 @@
             {'columns': ['distributor_id', 'sls_id', 'outlet_id']},
             {'columns': ['pcode']},
             {'columns': ['subbrand_id']},
-            {'columns': ['gsalesforce_id']},
+            {'columns': ['gdiv_id']},
             {'columns': ['group_channel_id']}
         ]
     )
 }}
 
 WITH 
--- 1. BASELINE DARI SILVER OA PERFORMANCE
+-- 1. BASELINE DARI SILVER OA PERFORMANCE (SSoT UNTUK CB, OA, & HIERARKI M3)
 cte_silver AS (
     SELECT 
         s.tahun::int AS year,
         s.periode::int AS period,
-        s.week::int AS week,
+        COALESCE(s.week::int, 0) AS week,
         s.date AS report_date,
         
-        -- HIERARKI M3
+        -- HIERARKI PENJUALAN & DIVISI
+        COALESCE(s.gdiv_id, 'UNMAPPED') AS gdiv_id,
+        COALESCE(s.gdiv_nm, 'UNMAPPED') AS gdiv_nm,
         COALESCE(s.sd_id, 'UNMAPPED') AS sd_id,
         COALESCE(s.sd_nm, 'UNMAPPED') AS sd_nm,
         COALESCE(s.nsm_id, 'UNMAPPED') AS nsm_id,
@@ -48,22 +50,22 @@ cte_silver AS (
         COALESCE(s.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
         
         -- PRODUK
-        COALESCE(s.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
-        COALESCE(s.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
-        COALESCE(s.pcode, 'NO_PCODE') AS pcode,
-        COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
+        NULLIF(s.subbrand_id, '') AS subbrand_id,
+        NULLIF(s.subbrand_nm, '') AS subbrand_nm,
+        NULLIF(s.pcode, '') AS pcode,
+        NULLIF(s.pcode_nm, '') AS pcode_nm,
         
-        -- METRICS TRANSAKSI MURNI
+        -- METRICS TRANSAKSI MURNI SFA
         COALESCE(s.inv_qty, 0) AS inv_qty,
         COALESCE(s.inv_val, 0) AS inv_val,
         
-        -- FLAG CB & OA
+        -- FLAG BASELINE
         1 AS is_cb_active,
         CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_visited
     FROM bift.silver_oa_performance s
 ),
 
--- 2. TARGET CALL HARIAN (KPL)
+-- 2. TARGET CALL HARIAN (KPL) PER DISTRIBUTOR & SALESMAN
 cte_target_call AS (
     SELECT 
         distributor_id::varchar AS distributor_id,
@@ -74,19 +76,20 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 3. GRADE & FACING IR DARI DASHBOARD DETAIL (AGGREGATE TANPA KUNCI REPORT_DATE KETAT)
-cte_grading AS (
+-- 3. AGGREGATION GRADE DARI GOLD DASHBOARD (DENGAN LOCK GDIV_ID / DIVISI)
+cte_grading_hierarchy AS (
     SELECT 
         year, 
         period, 
-        distributor_id, 
-        outlet_id, 
-        pcode,
+        COALESCE(gdiv_id, '03') AS gdiv_id, -- Default '03' jika null untuk M3
+        distributor_id::varchar AS distributor_id, 
+        sls_id::varchar AS sls_id,
+        outlet_id::varchar AS outlet_id,
         MAX(grade) AS grade,
         SUM(facing_qty) AS facing_qty
     FROM {{ ref('gold_grading_dashboard') }}
-    WHERE grade IS NOT NULL
-    GROUP BY year, period, distributor_id, outlet_id, pcode
+    WHERE grade IS NOT NULL AND grade != ''
+    GROUP BY year, period, COALESCE(gdiv_id, '03'), distributor_id, sls_id, outlet_id
 )
 
 -- MAIN MODEL FINAL
@@ -96,7 +99,8 @@ SELECT
     s.week,
     s.report_date,
     
-    -- HIERARKI PENJUALAN M3
+    -- HIERARKI PENJUALAN M3 / DIVISI
+    s.gdiv_id, s.gdiv_nm,
     s.sd_id, s.sd_nm,
     s.nsm_id, s.nsm_nm,
     s.grsm_id, s.grsm_nm,
@@ -113,11 +117,13 @@ SELECT
     s.group_channel_id,
     s.group_channel_nm,
     
-    -- PRODUK & GRADE (DENGAN FALLBACK JELAS)
-    s.subbrand_id,
-    s.subbrand_nm,
-    s.pcode,
-    s.pcode_nm,
+    -- PRODUK
+    COALESCE(s.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
+    COALESCE(s.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
+    COALESCE(s.pcode, 'NO_PCODE') AS pcode,
+    COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
+    
+    -- GRADE DISPLAY IR (FALLBACK JIKA TIDAK MEMILIKI RECORD AUDIT)
     COALESCE(g.grade, 'UNGRADED / NO GRADE RECORD') AS grade,
     
     -- METRICS
@@ -130,16 +136,17 @@ SELECT
 
 FROM cte_silver s
 
--- JOIN TARGET CALL
+-- JOIN 1: TARGET CALL HARIAN
 LEFT JOIN cte_target_call tc
     ON s.distributor_id = tc.distributor_id
    AND s.sls_id = tc.sls_id
    AND s.report_date = tc.report_date
 
--- JOIN GRADE DISPLAY IR (JOIN KE BULAN, DISTRIBUTOR, OUTLET & PCODE)
-LEFT JOIN cte_grading g
-    ON s.distributor_id = g.distributor_id
-   AND s.outlet_id = g.outlet_id
-   AND s.year = g.year
-   AND s.period = g.period
-   AND s.pcode = g.pcode
+-- JOIN 2: GRADE DISPLAY (KUNCI ISOLASI MUTLAK: GDIV + DIST + SLS + OUTLET + YEAR + PERIOD)
+LEFT JOIN cte_grading_hierarchy g
+    ON s.gdiv_id = g.gdiv_id                -- 👈 Lock Divisi
+   AND s.distributor_id = g.distributor_id  -- 👈 Lock Distributor / Cabang
+   AND s.sls_id = g.sls_id                  -- 👈 Lock Salesman
+   AND s.outlet_id = g.outlet_id            -- 👈 Lock Toko
+   AND s.year = g.year                      -- 👈 Lock Tahun
+   AND s.period = g.period                 -- 👈 Lock Periode Bulanan
