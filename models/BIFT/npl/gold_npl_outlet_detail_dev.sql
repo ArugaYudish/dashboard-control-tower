@@ -111,7 +111,12 @@ non_purchasing AS (
         0::numeric                                  AS qty_carton,
         0::numeric                                  AS inv_val,
         0                                           AS is_transaction
-    FROM bift.silver_oa_performance s
+    FROM (
+        SELECT *
+        FROM bift.silver_oa_performance
+        WHERE is_transaction = 0
+          AND tahun          = 2026
+    ) s
     INNER JOIN week_bridge wb
             ON wb.tahun   = s.tahun
            AND wb.periode = s.periode
@@ -120,8 +125,6 @@ non_purchasing AS (
           AND s.source_schema = 'm2'
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
-    WHERE s.is_transaction = 0
-      AND s.tahun          = 2026
     GROUP BY
         s.source_schema, s.tahun, s.periode, wb.week,
         s.gdiv_id, s.gdiv_nm,
@@ -221,14 +224,17 @@ purchasing AS (
         COALESCE(SUM(s.qty_carton), 0)              AS qty_carton,
         COALESCE(SUM(s.inv_val), 0)                 AS inv_val,
         1                                           AS is_transaction
-    FROM bift.silver_oa_performance s
+    FROM (
+        SELECT *
+        FROM bift.silver_oa_performance
+        WHERE is_transaction = 1
+          AND tahun          = 2026
+    ) s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
           AND s.source_schema = 'm2'
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
-    WHERE s.is_transaction = 1
-      AND s.tahun          = 2026
     GROUP BY
         s.source_schema, s.tahun, s.periode, s.week,
         s.gdiv_id, s.gdiv_nm,
