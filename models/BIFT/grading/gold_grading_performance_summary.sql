@@ -3,172 +3,131 @@
         materialized = 'table',
         schema = 'spx',
         alias = 'gold_grading_performance_summary',
-        pre_hook = "SET LOCAL work_mem = '512MB';",
         indexes = [
             {'columns': ['year', 'period', 'week']},
             {'columns': ['report_date']},
             {'columns': ['sd_id', 'rsm_id', 'ss_id']},
             {'columns': ['distributor_id', 'sls_id', 'outlet_id']},
-            {'columns': ['gdiv_id', 'pcode']},
-            {'columns': ['subbrand_id']},
-            {'columns': ['grade']},
-            {'columns': ['is_transaction', 'is_display', 'is_avis']}
+            {'columns': ['pcode']},
+            {'columns': ['grade']}
         ]
     )
 }}
 
 WITH 
 ----------------------------------------------------------------------
--- 1. BASELINE CUSTOMER BASE & TRANSAKSI SFA (SSoT SILVER)
+-- 1. MASTER OUTLET & HIERARKI DARI SILVER (PEMBAGI % / DENOMINATOR)
 ----------------------------------------------------------------------
-cte_silver AS (
-    SELECT 
-        s.tahun::int AS year,
-        s.periode::int AS period,
-        COALESCE(s.week::int, 0) AS week,
-        
-        -- DATES
-        s.date AS report_date,
-        s.inv_date,
-        
-        -- HIERARKI PENJUALAN & WILAYAH
-        s.source_schema,
-        COALESCE(s.gdiv_id, 'UNMAPPED') AS gdiv_id,
-        COALESCE(s.gdiv_nm, 'UNMAPPED') AS gdiv_nm,
-        COALESCE(s.sd_id, 'UNMAPPED') AS sd_id,
-        COALESCE(s.sd_nm, 'UNMAPPED') AS sd_nm,
-        COALESCE(s.nsm_id, 'UNMAPPED') AS nsm_id,
-        COALESCE(s.nsm_nm, 'UNMAPPED') AS nsm_nm,
-        COALESCE(s.grsm_id, 'UNMAPPED') AS grsm_id,
-        COALESCE(s.grsm_nm, 'UNMAPPED') AS grsm_nm,
-        COALESCE(s.rsm_id, 'UNMAPPED') AS rsm_id,
-        COALESCE(s.rsm_nm, 'UNMAPPED') AS rsm_nm,
-        COALESCE(s.ss_id, 'UNMAPPED') AS ss_id,
-        COALESCE(s.ss_nm, 'UNMAPPED') AS ss_nm,
-        s.distributor_id::varchar AS distributor_id,
-        COALESCE(s.distributor_nm, 'UNKNOWN') AS distributor_nm,
-        s.sls_id::varchar AS sls_id,
-        COALESCE(s.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
-        s.cust_id::varchar AS outlet_id,
-        s.cust_nm,
-        
-        -- SALESFORCE & CHANNEL
-        COALESCE(s.salesforce_id, 'N/A') AS salesforce_id,
-        COALESCE(s.salesforce_nm, 'UNMAPPED_SALESFORCE') AS salesforce_nm,
-        COALESCE(s.gsalesforce2_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
-        COALESCE(s.gsalesforce2_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
-        COALESCE(s.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
-        COALESCE(s.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
-        
-        -- PRODUK & METRICS TRANSAKSI
-        COALESCE(NULLIF(s.pcode, ''), 'NO_PCODE') AS pcode,
-        COALESCE(NULLIF(s.pcode_nm, ''), 'NO PCODE / UNVISITED') AS pcode_nm,
-        COALESCE(NULLIF(s.subbrand_id, ''), 'NO_TRANSACTION') AS subbrand_id,
-        COALESCE(NULLIF(s.subbrand_nm, ''), 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
-        COALESCE(s.inv_qty, 0) AS inv_qty,
-        COALESCE(s.inv_val, 0) AS inv_val,
-        
-        -- FLAG TRANSAKSI SFA
-        s.is_transaction
-    FROM {{ ref('silver_oa_performance') }} s
+cte_master_outlet_silver AS (
+    SELECT DISTINCT
+        tahun::int AS year,
+        periode::int AS period,
+        gdiv_id, gdiv_nm,
+        sd_id, sd_nm,
+        nsm_id, nsm_nm,
+        grsm_id, grsm_nm,
+        rsm_id, rsm_nm,
+        ss_id, ss_nm,
+        distributor_id::varchar AS distributor_id,
+        distributor_nm,
+        cust_id::varchar AS outlet_id,
+        cust_nm,
+        city
+    FROM {{ ref('silver_oa_performance') }}
 ),
 
 ----------------------------------------------------------------------
--- 2. DEDUP TARGET CALL HARIAN (KPL) PER SALESMAN
+-- 2. ALL ACTIVITY & IR PCODE DARI GOLD GRADING DASHBOARD (MAIN DATA)
 ----------------------------------------------------------------------
-cte_target_call AS (
+cte_grading_dashboard AS (
     SELECT 
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        tgl::date AS report_date,
-        SUM(tgt_call::int) AS tgt_call_daily
-    FROM raw_ficom_m3.m_nmrc_subdetail
-    GROUP BY distributor_id, sls_id, tgl
-),
-
-----------------------------------------------------------------------
--- 3. DEDUP AUDIT IR GRADING (AGGREGATE LEVEL TOKO & DIVISI PER PERIODE)
-----------------------------------------------------------------------
-cte_grading_from_gold AS (
-    SELECT 
-        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
-        distributor_id::varchar AS distributor_id,
-        outlet_id::varchar AS outlet_id,
         year::int AS year,
         period::int AS period,
-        MAX(visit_date::date) AS visit_date,
-        MAX(NULLIF(TRIM(grade), '')) AS final_grade,
-        SUM(COALESCE(facing_qty, 0)) AS total_facing
+        week::int AS week,
+        visit_date::date AS report_date,
+        visit_date,
+        inv_date,
+        distributor_id::varchar AS distributor_id,
+        outlet_id::varchar AS outlet_id,
+        sls_id::varchar AS sls_id,
+        sls_nm,
+        pcode::varchar AS pcode,
+        pcode_nm,
+        subbrand_id, subbrand_nm,
+        cat_id, cat_nm,
+        salesforce_id, salesforce_nm,
+        gsalesforce_id, gsalesforce_nm,
+        group_channel_id, group_channel_nm,
+        div_id, div_nm,
+        COALESCE(NULLIF(TRIM(grade), ''), 'UNGRADED / NO GRADE RECORD') AS grade,
+        kode_ap,
+        COALESCE(facing_qty, 0) AS facing_qty,
+        COALESCE(is_ir_detected, 0) AS is_ir_detected,
+        COALESCE(inv_qty, 0) AS inv_qty,
+        COALESCE(inv_val, 0) AS inv_val,
+        is_ec_transaction,
+        is_ec_display,
+        is_ec_avis,
+        anomaly_status
     FROM {{ ref('gold_grading_dashboard') }}
-    WHERE NULLIF(TRIM(grade), '') IS NOT NULL OR facing_qty > 0
-    GROUP BY 
-        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'),
-        distributor_id::varchar, 
-        outlet_id::varchar, 
-        year::int, 
-        period::int
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY FINAL SUMMARY
+-- MAIN QUERY SUMMARY (FULL OUTER JOIN / LEFT JOIN UNTUK PERSENTASE %)
 ----------------------------------------------------------------------
 SELECT 
-    s.year,
-    s.period,
-    s.week,
+    COALESCE(g.year, m.year) AS year,
+    COALESCE(g.period, m.period) AS period,
+    g.week,
     
-    -- DATES
-    COALESCE(s.report_date, g.visit_date) AS report_date,
-    s.inv_date,
+    -- TANGGAL 100% MURNI DARI GRADING DASHBOARD
+    g.report_date,
     g.visit_date,
+    g.inv_date,
     
-    -- HIERARKI PENJUALAN & DIVISI
-    s.gdiv_id, s.gdiv_nm,
-    s.sd_id, s.sd_nm,
-    s.nsm_id, s.nsm_nm,
-    s.grsm_id, s.grsm_nm,
-    s.rsm_id, s.rsm_nm,
-    s.ss_id, s.ss_nm,
-    s.sls_id, s.sls_nm,
-    s.distributor_id, s.distributor_nm,
-    s.outlet_id, s.cust_nm,
+    -- HIERARKI & MASTER OUTLET (MURNI CUSTOMER BASE SILVER)
+    m.sd_id, m.sd_nm,
+    m.nsm_id, m.nsm_nm,
+    m.grsm_id, m.grsm_nm,
+    m.rsm_id, m.rsm_nm,
+    m.ss_id, m.ss_nm,
+    COALESCE(g.distributor_id, m.distributor_id) AS distributor_id,
+    COALESCE(m.distributor_nm, 'UNKNOWN') AS distributor_nm,
+    COALESCE(g.outlet_id, m.outlet_id) AS outlet_id,
+    COALESCE(m.cust_nm, 'UNKNOWN OUTLET') AS cust_nm,
+    m.city,
     
-    -- SALESFORCE & CHANNEL
-    s.salesforce_id, s.salesforce_nm,
-    s.gsalesforce_id, s.gsalesforce_nm,
-    s.group_channel_id, s.group_channel_nm,
+    -- METRIBUTES IR & SALESMAN MURNI DARI GRADING DASHBOARD
+    g.sls_id,
+    g.sls_nm,
+    g.pcode,
+    g.pcode_nm,
+    g.subbrand_id, g.subbrand_nm,
+    g.cat_id, g.cat_nm,
+    g.salesforce_id, g.salesforce_nm,
+    g.gsalesforce_id, g.gsalesforce_nm,
+    g.group_channel_id, g.group_channel_nm,
+    g.div_id, g.div_nm,
     
-    -- PRODUK & SUBBRAND
-    s.pcode, s.pcode_nm,
-    s.subbrand_id, s.subbrand_nm,
+    -- GRADE & FACING IR
+    COALESCE(g.grade, 'UNVISITED / UNGRADED') AS grade,
+    g.kode_ap,
+    COALESCE(g.facing_qty, 0) AS facing_qty,
     
-    -- GRADE DISPLAY IR & FACING PAJANGAN
-    COALESCE(g.final_grade, 'UNGRADED / NO GRADE RECORD') AS grade,
-    COALESCE(g.total_facing, 0) AS facing_qty,
-    
-    -- METRICS KUANTITATIF
-    1 AS is_cb_active,
-    COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
-    s.inv_qty,
-    s.inv_val,
-    
-    -- TRI-FLAG KATEGORI KUNJUNGAN UNTUK FILTER METABASE
-    s.is_transaction,
-    CASE WHEN g.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_display,
-    CASE WHEN (s.is_transaction = 1 OR g.outlet_id IS NOT NULL) THEN 1 ELSE 0 END AS is_avis
+    -- METRICS KUANTITATIF & FLAGS
+    1 AS is_cb_master, -- Penyebut untuk total populasi toko di SFA
+    COALESCE(g.is_ir_detected, 0) AS is_ir_detected,
+    COALESCE(g.inv_qty, 0) AS inv_qty,
+    COALESCE(g.inv_val, 0) AS inv_val,
+    COALESCE(g.is_ec_transaction, 0) AS is_ec_transaction,
+    COALESCE(g.is_ec_display, 0) AS is_ec_display,
+    COALESCE(g.is_ec_avis, 0) AS is_ec_avis,
+    COALESCE(g.anomaly_status, '4. No IR & No Sales') AS anomaly_status
 
-FROM cte_silver s
-
--- JOIN 1: TARGET CALL HARIAN
-LEFT JOIN cte_target_call tc
-    ON s.distributor_id = tc.distributor_id
-   AND s.sls_id         = tc.sls_id
-   AND s.report_date    = tc.report_date
-
--- JOIN 2: GRADING IR (JANGKAR TOKO FISIK & DIVISI)
-LEFT JOIN cte_grading_from_gold g
-    ON s.gdiv_id        = g.gdiv_id
-   AND s.distributor_id = g.distributor_id
-   AND s.outlet_id      = g.outlet_id
-   AND s.year           = g.year
-   AND s.period         = g.period
+FROM cte_master_outlet_silver m
+-- FULL OUTER JOIN agar Toko yang ada di CB tapi belum dikunjungi IR tetap masuk sebagai Penyebut %
+FULL OUTER JOIN cte_grading_dashboard g
+    ON m.distributor_id = g.distributor_id
+   AND m.outlet_id      = g.outlet_id
+   AND m.year           = g.year
+   AND m.period         = g.period
