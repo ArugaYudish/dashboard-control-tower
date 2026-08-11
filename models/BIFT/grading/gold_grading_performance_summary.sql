@@ -16,7 +16,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 1. MASTER OUTLET & HIERARKI (SILVER - KEBUTUHAN PERIODE/CB)
+-- 1. MASTER OUTLET & HIERARKI (SILVER)
 ----------------------------------------------------------------------
 cte_master_outlet_silver AS (
     SELECT DISTINCT
@@ -99,7 +99,7 @@ cte_grading_dashboard AS (
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY SUMMARY (FULL JOIN MASTER SILVER + GOLD IR + NMRC TGT CALL)
+-- MAIN QUERY SUMMARY
 ----------------------------------------------------------------------
 SELECT 
     COALESCE(g.year, s.year, nm.year) AS year,
@@ -131,7 +131,7 @@ SELECT
     g.subbrand_id, g.subbrand_nm,
     g.cat_id, g.cat_nm,
     g.salesforce_id, g.salesforce_nm,
-    g.gsalesforce_id, gsalesforce_nm,
+    g.gsalesforce_id, g.gsalesforce_nm,
     g.group_channel_id, g.group_channel_nm,
     g.div_id, g.div_nm,
     
@@ -164,7 +164,7 @@ FULL OUTER JOIN cte_grading_dashboard g
    AND s.period         = g.period
 LEFT JOIN cte_nmrc_tgt_call nm
     ON COALESCE(g.distributor_id, s.distributor_id) = nm.distributor_id
-   AND COALESCE(g.sls_id, s.gdiv_id)                = nm.sls_id -- 👈 Terhubung ke Salesman
+   AND COALESCE(g.sls_id, nm.sls_id)                = nm.sls_id
    AND COALESCE(g.year, s.year)                     = nm.year
    AND COALESCE(g.period, s.period)                 = nm.period
-   AND COALESCE(g.report_date, s.year::text)        = nm.report_date::text;
+   AND COALESCE(g.report_date, nm.report_date)      = nm.report_date
