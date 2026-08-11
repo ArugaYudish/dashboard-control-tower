@@ -9,7 +9,7 @@
             {'columns': ['report_date']},
             {'columns': ['sd_id', 'rsm_id', 'ss_id']},
             {'columns': ['distributor_id', 'sls_id', 'outlet_id']},
-            {'columns': ['pcode']},
+            {'columns': ['gdiv_id', 'pcode']},
             {'columns': ['subbrand_id']},
             {'columns': ['grade']},
             {'columns': ['is_transaction', 'is_display', 'is_avis']}
@@ -74,7 +74,7 @@ cte_silver AS (
 ),
 
 ----------------------------------------------------------------------
--- 2. DEDUP TARGET CALL HARIAN (KPL) PER SALESMAN
+-- 2. DEDUP TARGET CALL HARIAN (KPL) PER SALESMAN & DISTRIBUTOR
 ----------------------------------------------------------------------
 cte_target_call AS (
     SELECT 
@@ -87,11 +87,13 @@ cte_target_call AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. DEDUP AUDIT IR GRADING (AGGREGATE LEVEL TOKO PER PERIODE)
+-- 3. DEDUP AUDIT IR GRADING (DEDUP TERISOLASI PER DIVISI & SALESMAN)
 ----------------------------------------------------------------------
 cte_grading_from_gold AS (
     SELECT 
+        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
         distributor_id::varchar AS distributor_id,
+        sls_id::varchar AS sls_id,
         outlet_id::varchar AS outlet_id,
         year::int AS year,
         period::int AS period,
@@ -100,11 +102,17 @@ cte_grading_from_gold AS (
         SUM(COALESCE(facing_qty, 0)) AS total_facing
     FROM {{ ref('gold_grading_dashboard') }}
     WHERE NULLIF(TRIM(grade), '') IS NOT NULL OR facing_qty > 0
-    GROUP BY distributor_id::varchar, outlet_id::varchar, year::int, period::int
+    GROUP BY 
+        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), 
+        distributor_id::varchar, 
+        sls_id::varchar, 
+        outlet_id::varchar, 
+        year::int, 
+        period::int
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY FINAL SUMMARY
+-- MAIN QUERY FINAL SUMMARY (PERFECT DIVISION & HIERARCHY ISOLATION)
 ----------------------------------------------------------------------
 SELECT 
     s.year,
@@ -156,12 +164,14 @@ FROM cte_silver s
 -- JOIN 1: TARGET CALL HARIAN
 LEFT JOIN cte_target_call tc
     ON s.distributor_id = tc.distributor_id
-   AND s.sls_id = tc.sls_id
-   AND s.report_date = tc.report_date
+   AND s.sls_id         = tc.sls_id
+   AND s.report_date    = tc.report_date
 
--- JOIN 2: GRADING IR LEVEL TOKO (TANPA KUNCI GDIV AGAR GRADE NEMPEL KE PCODE)
+-- JOIN 2: GRADING IR (MENGUNCI GDIV + DISTRIBUTOR + SALESMAN + TOKO + PERIODE)
 LEFT JOIN cte_grading_from_gold g
-    ON s.distributor_id = g.distributor_id
-   AND s.outlet_id     = g.outlet_id
-   AND s.year          = g.year
-   AND s.period        = g.period
+    ON s.gdiv_id        = g.gdiv_id
+   AND s.distributor_id = g.distributor_id
+   AND s.sls_id         = g.sls_id
+   AND s.outlet_id      = g.outlet_id
+   AND s.year           = g.year
+   AND s.period         = g.period
