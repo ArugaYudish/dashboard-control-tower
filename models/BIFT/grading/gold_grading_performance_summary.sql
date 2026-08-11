@@ -74,7 +74,7 @@ cte_silver AS (
 ),
 
 ----------------------------------------------------------------------
--- 2. DEDUP TARGET CALL HARIAN (KPL) PER SALESMAN & DISTRIBUTOR
+-- 2. DEDUP TARGET CALL HARIAN (KPL) PER SALESMAN
 ----------------------------------------------------------------------
 cte_target_call AS (
     SELECT 
@@ -87,13 +87,12 @@ cte_target_call AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. DEDUP AUDIT IR GRADING (DEDUP TERISOLASI PER DIVISI & SALESMAN)
+-- 3. DEDUP AUDIT IR GRADING (AGGREGATE LEVEL TOKO & DIVISI PER PERIODE)
 ----------------------------------------------------------------------
 cte_grading_from_gold AS (
     SELECT 
         COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
         distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
         outlet_id::varchar AS outlet_id,
         year::int AS year,
         period::int AS period,
@@ -103,16 +102,15 @@ cte_grading_from_gold AS (
     FROM {{ ref('gold_grading_dashboard') }}
     WHERE NULLIF(TRIM(grade), '') IS NOT NULL OR facing_qty > 0
     GROUP BY 
-        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), 
+        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'),
         distributor_id::varchar, 
-        sls_id::varchar, 
         outlet_id::varchar, 
         year::int, 
         period::int
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY FINAL SUMMARY (PERFECT DIVISION & HIERARCHY ISOLATION)
+-- MAIN QUERY FINAL SUMMARY
 ----------------------------------------------------------------------
 SELECT 
     s.year,
@@ -167,11 +165,10 @@ LEFT JOIN cte_target_call tc
    AND s.sls_id         = tc.sls_id
    AND s.report_date    = tc.report_date
 
--- JOIN 2: GRADING IR (MENGUNCI GDIV + DISTRIBUTOR + SALESMAN + TOKO + PERIODE)
+-- JOIN 2: GRADING IR (JANGKAR TOKO FISIK & DIVISI)
 LEFT JOIN cte_grading_from_gold g
     ON s.gdiv_id        = g.gdiv_id
    AND s.distributor_id = g.distributor_id
-   AND s.sls_id         = g.sls_id
    AND s.outlet_id      = g.outlet_id
    AND s.year           = g.year
    AND s.period         = g.period
