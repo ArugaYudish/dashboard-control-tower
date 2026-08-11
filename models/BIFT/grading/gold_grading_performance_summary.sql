@@ -32,7 +32,7 @@ cte_master_outlet_silver AS (
         distributor_nm,
         cust_id::varchar AS outlet_id,
         cust_nm,
-        city
+        kabupaten_name AS city -- 👈 FIX: Ambil dari kabupaten_name di Silver!
     FROM {{ ref('silver_oa_performance') }}
 ),
 
@@ -73,7 +73,7 @@ cte_grading_dashboard AS (
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY SUMMARY (FULL OUTER JOIN / LEFT JOIN UNTUK PERSENTASE %)
+-- MAIN QUERY SUMMARY (FULL OUTER JOIN DENGAN MASTER OUTLET)
 ----------------------------------------------------------------------
 SELECT 
     COALESCE(g.year, m.year) AS year,
@@ -85,7 +85,7 @@ SELECT
     g.visit_date,
     g.inv_date,
     
-    -- HIERARKI & MASTER OUTLET (MURNI CUSTOMER BASE SILVER)
+    -- HIERARKI & MASTER OUTLET
     m.sd_id, m.sd_nm,
     m.nsm_id, m.nsm_nm,
     m.grsm_id, m.grsm_nm,
@@ -97,7 +97,7 @@ SELECT
     COALESCE(m.cust_nm, 'UNKNOWN OUTLET') AS cust_nm,
     m.city,
     
-    -- METRIBUTES IR & SALESMAN MURNI DARI GRADING DASHBOARD
+    -- ATRIBUT IR & SALESMAN MURNI DARI GRADING DASHBOARD
     g.sls_id,
     g.sls_nm,
     g.pcode,
@@ -115,7 +115,7 @@ SELECT
     COALESCE(g.facing_qty, 0) AS facing_qty,
     
     -- METRICS KUANTITATIF & FLAGS
-    1 AS is_cb_master, -- Penyebut untuk total populasi toko di SFA
+    1 AS is_cb_master,
     COALESCE(g.is_ir_detected, 0) AS is_ir_detected,
     COALESCE(g.inv_qty, 0) AS inv_qty,
     COALESCE(g.inv_val, 0) AS inv_val,
@@ -125,7 +125,6 @@ SELECT
     COALESCE(g.anomaly_status, '4. No IR & No Sales') AS anomaly_status
 
 FROM cte_master_outlet_silver m
--- FULL OUTER JOIN agar Toko yang ada di CB tapi belum dikunjungi IR tetap masuk sebagai Penyebut %
 FULL OUTER JOIN cte_grading_dashboard g
     ON m.distributor_id = g.distributor_id
    AND m.outlet_id      = g.outlet_id
