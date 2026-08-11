@@ -177,4 +177,4 @@ LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc
     ON COALESCE(act.salesforce_id, o.salesforce_id) = mgc.salesforce_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
-    ON o.channel_id = mcs.channel_id::varchar;
+    ON o.channel_id = mcs.channel_id::varchar
