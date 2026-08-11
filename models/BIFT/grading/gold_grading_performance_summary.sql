@@ -1,6 +1,8 @@
 {{
     config(
         materialized = 'table',
+        schema = 'spx',
+        alias = 'gold_grading_performance_summary',
         indexes = [
             {'columns': ['year', 'period', 'week']},
             {'columns': ['report_date']},
@@ -9,13 +11,15 @@
             {'columns': ['pcode']},
             {'columns': ['subbrand_id']},
             {'columns': ['gdiv_id']},
-            {'columns': ['group_channel_id']}
+            {'columns': ['group_channel_id']},
+            {'columns': ['grade']},
+            {'columns': ['is_transaction', 'is_display', 'is_avis']}
         ]
     )
 }}
 
 WITH 
--- 1. BASELINE DARI SILVER OA PERFORMANCE (SSoT UNTUK CB, OA, & HIERARKI M3)
+-- 1. BASELINE DARI SILVER OA PERFORMANCE (SSoT)
 cte_silver AS (
     SELECT 
         s.tahun::int AS year,
@@ -42,8 +46,9 @@ cte_silver AS (
         COALESCE(s.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
         s.cust_id::varchar AS outlet_id,
         
-        -- SALESFORCE & CHANNEL
+        -- SALESFORCE LENGKAP (ID & NAMA)
         COALESCE(s.salesforce_id, 'N/A') AS salesforce_id,
+        COALESCE(s.salesforce_nm, 'UNMAPPED_SALESFORCE') AS salesforce_nm,
         COALESCE(s.gsalesforce2_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
         COALESCE(s.gsalesforce2_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
         COALESCE(s.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
@@ -59,10 +64,9 @@ cte_silver AS (
         COALESCE(s.inv_qty, 0) AS inv_qty,
         COALESCE(s.inv_val, 0) AS inv_val,
         
-        -- FLAG BASELINE
-        1 AS is_cb_active,
-        CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_visited
-    FROM bift.silver_oa_performance s
+        -- FLAG SFA TRANSAKSI
+        CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_transaction
+    FROM {{ ref('silver_oa_performance') }} s
 ),
 
 -- 2. TARGET CALL HARIAN (KPL) PER DISTRIBUTOR & SALESMAN
@@ -76,20 +80,20 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 3. AGGREGATION GRADE DARI GOLD DASHBOARD (DENGAN LOCK GDIV_ID / DIVISI)
+-- 3. AGGREGATION GRADE DARI GOLD DASHBOARD
 cte_grading_hierarchy AS (
     SELECT 
-        year, 
-        period, 
-        COALESCE(gdiv_id, '03') AS gdiv_id, -- Default '03' jika null untuk M3
+        year::int AS year, 
+        period::int AS period, 
+        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
         distributor_id::varchar AS distributor_id, 
         sls_id::varchar AS sls_id,
         outlet_id::varchar AS outlet_id,
-        MAX(grade) AS grade,
-        SUM(facing_qty) AS facing_qty
+        MAX(NULLIF(TRIM(grade), '')) AS grade,
+        SUM(COALESCE(facing_qty, 0)) AS facing_qty
     FROM {{ ref('gold_grading_dashboard') }}
-    WHERE grade IS NOT NULL AND grade != ''
-    GROUP BY year, period, COALESCE(gdiv_id, '03'), distributor_id, sls_id, outlet_id
+    WHERE NULLIF(TRIM(grade), '') IS NOT NULL
+    GROUP BY year, period, COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), distributor_id, sls_id, outlet_id
 )
 
 -- MAIN MODEL FINAL
@@ -110,8 +114,9 @@ SELECT
     s.distributor_id, s.distributor_nm,
     s.outlet_id,
     
-    -- SALESFORCE & CHANNEL
+    -- SALESFORCE LENGKAP & CHANNEL
     s.salesforce_id,
+    s.salesforce_nm,
     s.gsalesforce_id,
     s.gsalesforce_nm,
     s.group_channel_id,
@@ -123,16 +128,20 @@ SELECT
     COALESCE(s.pcode, 'NO_PCODE') AS pcode,
     COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
     
-    -- GRADE DISPLAY IR (FALLBACK JIKA TIDAK MEMILIKI RECORD AUDIT)
+    -- GRADE DISPLAY IR
     COALESCE(g.grade, 'UNGRADED / NO GRADE RECORD') AS grade,
     
-    -- METRICS
-    s.is_cb_active,
+    -- METRICS KUANTITATIF
+    1 AS is_cb_active,
     COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
     s.inv_qty,
     s.inv_val,
     COALESCE(g.facing_qty, 0) AS facing_qty,
-    s.is_visited
+    
+    -- FLAG UNTUK FILTER METABASE (AVIS, TRANSAKSI, DISPLAY)
+    s.is_transaction,
+    CASE WHEN g.outlet_id IS NOT NULL AND g.facing_qty > 0 THEN 1 ELSE 0 END AS is_display,
+    CASE WHEN s.is_transaction = 1 OR (g.outlet_id IS NOT NULL AND g.facing_qty > 0) THEN 1 ELSE 0 END AS is_avis
 
 FROM cte_silver s
 
@@ -142,11 +151,11 @@ LEFT JOIN cte_target_call tc
    AND s.sls_id = tc.sls_id
    AND s.report_date = tc.report_date
 
--- JOIN 2: GRADE DISPLAY (KUNCI ISOLASI MUTLAK: GDIV + DIST + SLS + OUTLET + YEAR + PERIOD)
+-- JOIN 2: GRADE DISPLAY (6 KUNCI KOMPOSIT)
 LEFT JOIN cte_grading_hierarchy g
-    ON s.gdiv_id = g.gdiv_id                -- 👈 Lock Divisi
-   AND s.distributor_id = g.distributor_id  -- 👈 Lock Distributor / Cabang
-   AND s.sls_id = g.sls_id                  -- 👈 Lock Salesman
-   AND s.outlet_id = g.outlet_id            -- 👈 Lock Toko
-   AND s.year = g.year                      -- 👈 Lock Tahun
-   AND s.period = g.period                 -- 👈 Lock Periode Bulanan
+    ON s.gdiv_id = g.gdiv_id
+   AND s.distributor_id = g.distributor_id
+   AND s.sls_id = g.sls_id
+   AND s.outlet_id = g.outlet_id
+   AND s.year = g.year
+   AND s.period = g.period
