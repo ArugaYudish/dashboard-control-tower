@@ -164,4 +164,4 @@ LEFT JOIN cte_grading_from_gold g
     ON s.distributor_id = g.distributor_id
    AND s.outlet_id     = g.outlet_id
    AND s.year          = g.year
-   AND s.period        = g.period;
+   AND s.period        = g.period
