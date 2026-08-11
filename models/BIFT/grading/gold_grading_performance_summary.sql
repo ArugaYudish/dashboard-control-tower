@@ -12,7 +12,6 @@
             {'columns': ['pcode']},
             {'columns': ['subbrand_id']},
             {'columns': ['gdiv_id']},
-            {'columns': ['group_channel_id']},
             {'columns': ['grade']},
             {'columns': ['is_transaction', 'is_display', 'is_avis']}
         ]
@@ -20,15 +19,19 @@
 }}
 
 WITH 
--- 1. BASELINE DARI SILVER OA PERFORMANCE (SSoT)
+-- 1. ANCHOR UTAMA: AMBIL SSoT CUSTOMER BASE & TRANSAKSI DARI SILVER
 cte_silver AS (
     SELECT 
         s.tahun::int AS year,
         s.periode::int AS period,
         COALESCE(s.week::int, 0) AS week,
-        s.date AS report_date,
         
-        -- HIERARKI PENJUALAN & DIVISI
+        -- Tanggal transaksi SFA (atau NULL jika non-purchasing)
+        s.date AS report_date,
+        s.inv_date,
+        
+        -- Hierarki Salesman & Wilayah
+        s.source_schema,
         COALESCE(s.gdiv_id, 'UNMAPPED') AS gdiv_id,
         COALESCE(s.gdiv_nm, 'UNMAPPED') AS gdiv_nm,
         COALESCE(s.sd_id, 'UNMAPPED') AS sd_id,
@@ -46,8 +49,9 @@ cte_silver AS (
         s.sls_id::varchar AS sls_id,
         COALESCE(s.sls_nm, 'UNKNOWN / UNMAPPED') AS sls_nm,
         s.cust_id::varchar AS outlet_id,
+        s.cust_nm,
         
-        -- SALESFORCE LENGKAP (ID & NAMA)
+        -- Salesforce & Channel
         COALESCE(s.salesforce_id, 'N/A') AS salesforce_id,
         COALESCE(s.salesforce_nm, 'UNMAPPED_SALESFORCE') AS salesforce_nm,
         COALESCE(s.gsalesforce2_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
@@ -55,59 +59,68 @@ cte_silver AS (
         COALESCE(s.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
         COALESCE(s.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
         
-        -- PRODUK
-        NULLIF(s.subbrand_id, '') AS subbrand_id,
-        NULLIF(s.subbrand_nm, '') AS subbrand_nm,
-        NULLIF(s.pcode, '') AS pcode,
-        NULLIF(s.pcode_nm, '') AS pcode_nm,
-        
-        -- METRICS TRANSAKSI MURNI SFA
+        -- Product & Transaksi
+        COALESCE(NULLIF(s.pcode, ''), 'NO_PCODE') AS pcode,
+        COALESCE(NULLIF(s.pcode_nm, ''), 'NO PCODE / UNVISITED') AS pcode_nm,
+        COALESCE(NULLIF(s.subbrand_id, ''), 'NO_TRANSACTION') AS subbrand_id,
+        COALESCE(NULLIF(s.subbrand_nm, ''), 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
         COALESCE(s.inv_qty, 0) AS inv_qty,
         COALESCE(s.inv_val, 0) AS inv_val,
-        
-        -- FLAG SFA TRANSAKSI
-        CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_transaction
+        s.is_transaction
     FROM {{ ref('silver_oa_performance') }} s
 ),
 
--- 2. TARGET CALL HARIAN (KPL) PER DISTRIBUTOR & SALESMAN
-cte_target_call AS (
+-- 2. DEDUP IR GRADING (AGGREGATE LEVEL TOKO PER MINGGU/PERIODE)
+cte_grading_store AS (
     SELECT 
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        tgl::date AS report_date,
-        SUM(tgt_call::int) AS tgt_call_daily
-    FROM raw_ficom_m3.m_nmrc_subdetail
-    GROUP BY distributor_id, sls_id, tgl
+        g.distributor_id::varchar AS distributor_id,
+        g.outlet_id::varchar AS outlet_id,
+        c.year::int AS year,
+        c.period::int AS period,
+        c.week::int AS week,
+        MAX(g.visit_date::date) AS ir_visit_date,
+        MAX(COALESCE(b.grade, g.grade)) AS final_grade
+    FROM raw_ficom_m3.t_grading_ir g
+    LEFT JOIN raw_ficom_m3.t_grading_banding b
+        ON g.distributor_id::varchar = b.distributor_id::varchar
+       AND g.outlet_id::varchar      = b.outlet_id::varchar
+       AND g.sls_id::varchar         = b.sls_id::varchar
+       AND g.kode_ap::varchar        = b.kode_ap::varchar
+       AND g.visit_date              = b.visit_date
+    LEFT JOIN spx.m_cycle3 c ON g.visit_date::date = c.cdate::date
+    WHERE g.visit_date >= '2025-01-01'
+      AND NULLIF(TRIM(COALESCE(b.grade, g.grade)), '') IS NOT NULL
+    GROUP BY g.distributor_id::varchar, g.outlet_id::varchar, c.year, c.period, c.week
 ),
 
--- 3. AGGREGATION GRADE DARI GOLD DASHBOARD (DIPERBAIKI: TAMBAH TANGGAL VISIT)
-cte_grading_hierarchy AS (
+-- 3. DEDUP FACING DISPLAY PER TOKO PER PCODE PER MINGGU
+cte_facing_item AS (
     SELECT 
-        year::int AS year, 
-        period::int AS period, 
-        visit_date::date AS report_date, -- <--- FIX 1: Tanggal visit IR dipertahankan
-        COALESCE(NULLIF(TRIM(gdiv_id), ''), '03') AS gdiv_id,
-        distributor_id::varchar AS distributor_id, 
-        sls_id::varchar AS sls_id,
-        outlet_id::varchar AS outlet_id,
-        MAX(NULLIF(TRIM(grade), '')) AS grade,
-        SUM(COALESCE(facing_qty, 0)) AS facing_qty
-    FROM {{ ref('gold_grading_dashboard') }}
-    WHERE NULLIF(TRIM(grade), '') IS NOT NULL
-    GROUP BY year, period, visit_date, COALESCE(NULLIF(TRIM(gdiv_id), ''), '03'), distributor_id, sls_id, outlet_id
+        r.distributor_id::varchar AS distributor_id,
+        r.outlet_id::varchar AS outlet_id,
+        r.pcode::varchar AS pcode,
+        c.year::int AS year,
+        c.period::int AS period,
+        c.week::int AS week,
+        SUM(COALESCE(r.count_facing::integer, 0)) AS total_facing
+    FROM raw_ficom_m3.t_rcall_avis_d r
+    LEFT JOIN spx.m_cycle3 c ON r.visit_date::date = c.cdate::date
+    WHERE r.visit_date >= '2025-01-01'
+    GROUP BY r.distributor_id::varchar, r.outlet_id::varchar, r.pcode::varchar, c.year, c.period, c.week
 )
 
--- MAIN MODEL FINAL
+-- MAIN MODEL FINAL GABUNGAN
 SELECT 
     s.year,
     s.period,
     s.week,
     
-    -- FIX 2: Fallback ke tanggal IR (visit_date) jika tanggal dari SFA NULL (non-purchasing rows)
-    COALESCE(s.report_date, g.report_date) AS report_date, 
+    -- Tanggal Report (Gunakan Tanggal IR Jika Transaksi Kosong)
+    COALESCE(s.report_date, gst.ir_visit_date) AS report_date,
+    s.inv_date,
+    gst.ir_visit_date AS visit_date,
     
-    -- HIERARKI PENJUALAN M3 / DIVISI
+    -- Hierarki Sales
     s.gdiv_id, s.gdiv_nm,
     s.sd_id, s.sd_nm,
     s.nsm_id, s.nsm_nm,
@@ -116,52 +129,46 @@ SELECT
     s.ss_id, s.ss_nm,
     s.sls_id, s.sls_nm,
     s.distributor_id, s.distributor_nm,
-    s.outlet_id,
+    s.outlet_id, s.cust_nm,
     
-    -- SALESFORCE LENGKAP & CHANNEL
-    s.salesforce_id,
-    s.salesforce_nm,
-    s.gsalesforce_id,
-    s.gsalesforce_nm,
-    s.group_channel_id,
-    s.group_channel_nm,
+    -- Salesforce & Channel
+    s.salesforce_id, s.salesforce_nm,
+    s.gsalesforce_id, s.gsalesforce_nm,
+    s.group_channel_id, s.group_channel_nm,
     
-    -- PRODUK
-    COALESCE(s.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
-    COALESCE(s.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
-    COALESCE(s.pcode, 'NO_PCODE') AS pcode,
-    COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
+    -- Product
+    s.pcode, s.pcode_nm,
+    s.subbrand_id, s.subbrand_nm,
     
-    -- GRADE DISPLAY IR
-    COALESCE(g.grade, 'UNGRADED / NO GRADE RECORD') AS grade,
+    -- Grade & Facing Display
+    COALESCE(gst.final_grade, 'UNGRADED / NO GRADE RECORD') AS grade,
+    COALESCE(f.total_facing, 0) AS facing_qty,
     
-    -- METRICS KUANTITATIF
+    -- Metrics
     1 AS is_cb_active,
-    COALESCE(tc.tgt_call_daily, 0) AS tgt_call_daily,
     s.inv_qty,
     s.inv_val,
-    COALESCE(g.facing_qty, 0) AS facing_qty,
     
-    -- FLAG UNTUK FILTER METABASE (AVIS, TRANSAKSI, DISPLAY)
+    -- Flag EC (Effective Call)
     s.is_transaction,
-    CASE WHEN g.outlet_id IS NOT NULL AND g.facing_qty > 0 THEN 1 ELSE 0 END AS is_display,
-    CASE WHEN s.is_transaction = 1 OR (g.outlet_id IS NOT NULL AND g.facing_qty > 0) THEN 1 ELSE 0 END AS is_avis
+    CASE WHEN gst.outlet_id IS NOT NULL THEN 1 ELSE 0 END AS is_display,
+    CASE WHEN (s.is_transaction = 1 OR gst.outlet_id IS NOT NULL) THEN 1 ELSE 0 END AS is_avis
 
 FROM cte_silver s
 
--- JOIN 1: TARGET CALL HARIAN
-LEFT JOIN cte_target_call tc
-    ON s.distributor_id = tc.distributor_id
-   AND s.sls_id = tc.sls_id
-   AND COALESCE(s.report_date, tc.report_date) = tc.report_date
+-- JOIN 1: PENEMPELAN GRADE TOKO (TANPA KUNCI GDIV_ID KARENA IR HANYA DI DIVISI 03)
+LEFT JOIN cte_grading_store gst
+    ON s.distributor_id = gst.distributor_id
+   AND s.outlet_id     = gst.outlet_id
+   AND s.year          = gst.year
+   AND s.period        = gst.period
+   AND (s.week = gst.week OR s.week = 0)
 
--- JOIN 2: GRADE DISPLAY (MATCH HARIAN DAHULU, FALLBACK KE PERIODE)
-LEFT JOIN cte_grading_hierarchy g
-    ON s.gdiv_id = g.gdiv_id
-   AND s.distributor_id = g.distributor_id
-   AND s.sls_id = g.sls_id
-   AND s.outlet_id = g.outlet_id
-   AND s.year = g.year
-   AND s.period = g.period
-   -- Matching tanggal jika keduanya memiliki tanggal (agar presisi harian)
-   AND (s.report_date = g.report_date OR s.report_date IS NULL)
+-- JOIN 2: PENEMPELAN FACING PER PCODE
+LEFT JOIN cte_facing_item f
+    ON s.distributor_id = f.distributor_id
+   AND s.outlet_id     = f.outlet_id
+   AND s.pcode         = f.pcode
+   AND s.year          = f.year
+   AND s.period        = f.period
+   AND (s.week = f.week OR s.week = 0);
