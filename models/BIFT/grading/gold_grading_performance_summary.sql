@@ -15,7 +15,7 @@
 }}
 
 WITH 
--- 1. BASELINE DARi SILVER OA PERFORMANCE (DEDUP ATRIBUT KUNCI)
+-- 1. BASELINE DARI SILVER OA PERFORMANCE
 cte_silver AS (
     SELECT 
         s.tahun::int AS year,
@@ -53,11 +53,11 @@ cte_silver AS (
         COALESCE(s.pcode, 'NO_PCODE') AS pcode,
         COALESCE(s.pcode_nm, 'NO PCODE / UNVISITED') AS pcode_nm,
         
-        -- METRICS TRANSAKSI MURNI SILVER
+        -- METRICS TRANSAKSI MURNI
         COALESCE(s.inv_qty, 0) AS inv_qty,
         COALESCE(s.inv_val, 0) AS inv_val,
         
-        -- FLAG CB & OA (IS_TRANSACTION 1 = OA, 0 = HANYA CB STAGING)
+        -- FLAG CB & OA
         1 AS is_cb_active,
         CASE WHEN s.is_transaction = 1 THEN 1 ELSE 0 END AS is_visited
     FROM bift.silver_oa_performance s
@@ -74,15 +74,19 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 3. GRADE & FACING IR DARI DASHBOARD DETAIL
+-- 3. GRADE & FACING IR DARI DASHBOARD DETAIL (AGGREGATE TANPA KUNCI REPORT_DATE KETAT)
 cte_grading AS (
     SELECT 
-        year, period, report_date,
-        distributor_id, sls_id, outlet_id, pcode,
+        year, 
+        period, 
+        distributor_id, 
+        outlet_id, 
+        pcode,
         MAX(grade) AS grade,
         SUM(facing_qty) AS facing_qty
     FROM {{ ref('gold_grading_dashboard') }}
-    GROUP BY year, period, report_date, distributor_id, sls_id, outlet_id, pcode
+    WHERE grade IS NOT NULL
+    GROUP BY year, period, distributor_id, outlet_id, pcode
 )
 
 -- MAIN MODEL FINAL
@@ -109,12 +113,12 @@ SELECT
     s.group_channel_id,
     s.group_channel_nm,
     
-    -- PRODUK & GRADE
+    -- PRODUK & GRADE (DENGAN FALLBACK JELAS)
     s.subbrand_id,
     s.subbrand_nm,
     s.pcode,
     s.pcode_nm,
-    g.grade,
+    COALESCE(g.grade, 'UNGRADED / NO GRADE RECORD') AS grade,
     
     -- METRICS
     s.is_cb_active,
@@ -132,12 +136,10 @@ LEFT JOIN cte_target_call tc
    AND s.sls_id = tc.sls_id
    AND s.report_date = tc.report_date
 
--- JOIN GRADE DISPLAY IR
+-- JOIN GRADE DISPLAY IR (JOIN KE BULAN, DISTRIBUTOR, OUTLET & PCODE)
 LEFT JOIN cte_grading g
     ON s.distributor_id = g.distributor_id
-   AND s.sls_id = g.sls_id
    AND s.outlet_id = g.outlet_id
    AND s.year = g.year
    AND s.period = g.period
-   AND s.report_date = g.report_date
    AND s.pcode = g.pcode
