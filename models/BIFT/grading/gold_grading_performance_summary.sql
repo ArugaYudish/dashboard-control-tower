@@ -76,9 +76,27 @@ cte_target_call AS (
     GROUP BY distributor_id, sls_id, tgl
 ),
 
--- 4. KONSOLIDASI SELURUH POPULASI TOKO (CB + REALISASI UNMAPPED)
+-- 4. PRE-AGGREGATION DARI DASHBOARD DULU (MENCEGAH DUPLIKASI DIPROSES DI MEMORI)
+cte_act_pcode AS (
+    SELECT 
+        year, period, COALESCE(week, 0) AS week, report_date,
+        distributor_id, sls_id, outlet_id,
+        subbrand_id, subbrand_nm, pcode, pcode_nm,
+        salesforce_id, group_channel_id, group_channel_nm,
+        MAX(grade) AS grade,
+        SUM(inv_qty) AS inv_qty,
+        SUM(inv_val) AS inv_val,
+        SUM(facing_qty) AS facing_qty
+    FROM {{ ref('gold_grading_dashboard') }}
+    GROUP BY 
+        year, period, COALESCE(week, 0), report_date,
+        distributor_id, sls_id, outlet_id,
+        subbrand_id, subbrand_nm, pcode, pcode_nm,
+        salesforce_id, group_channel_id, group_channel_nm
+),
+
+-- 5. KONSOLIDASI SELURUH POPULASI TOKO (CB + REALISASI UNMAPPED)
 cte_all_outlets AS (
-    -- Toko dari CB Baseline
     SELECT 
         distributor_id, sls_id, outlet_id, year, period, channel_id, salesforce_id,
         1 AS is_cb_active
@@ -86,21 +104,20 @@ cte_all_outlets AS (
     
     UNION
     
-    -- Toko dari Realisasi Dashboard (Mencakup toko unmapped / transaksi luar CB)
     SELECT DISTINCT 
         distributor_id, sls_id, outlet_id, year, period, group_channel_id AS channel_id, salesforce_id,
         0 AS is_cb_active
-    FROM {{ ref('gold_grading_dashboard') }}
+    FROM cte_act_pcode
 )
 
--- MAIN MODEL FINAL (LEVEL PCODE)
+-- MAIN MODEL FINAL
 SELECT 
     o.year,
     o.period,
     COALESCE(act.week, 0) AS week,
     act.report_date,
     
-    -- HIERARKI PENJUALAN M3 (LEFT JOIN DENGAN FALLBACK UNMAPPED AGAR DILUAR M3 TIDAK TERBUANG)
+    -- HIERARKI PENJUALAN M3
     COALESCE(ah.sd_id, 'UNMAPPED') AS sd_id, 
     COALESCE(ah.sd_nm, 'UNMAPPED') AS sd_nm,
     COALESCE(ah.nsm_id, 'UNMAPPED') AS nsm_id, 
@@ -124,7 +141,7 @@ SELECT
     COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
     COALESCE(mcs.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
     
-    -- PRODUK & REALISASI (LEVEL PCODE & SUBBRAND UTUH)
+    -- PRODUK & REALISASI (PCODE LEVEL)
     COALESCE(act.subbrand_id, 'NO_TRANSACTION') AS subbrand_id,
     COALESCE(act.subbrand_nm, 'NO TRANSACTION / UNVISITED') AS subbrand_nm,
     COALESCE(act.pcode, 'NO_PCODE') AS pcode,
@@ -141,27 +158,23 @@ SELECT
 
 FROM cte_all_outlets o
 
--- LEFT JOIN 1: HIERARKI PENJUALAN M3 (TIDAK MEMBUANG SALES UNMAPPED)
 LEFT JOIN active_hierarchy ah 
     ON o.distributor_id = ah.distributor_id 
    AND o.sls_id = ah.sls_id
 
--- LEFT JOIN 2: TRANSAKSI & IR DETAIL DARI FACT DASHBOARD (LEVEL PCODE)
-LEFT JOIN {{ ref('gold_grading_dashboard') }} act
+LEFT JOIN cte_act_pcode act
     ON o.distributor_id = act.distributor_id
    AND o.outlet_id = act.outlet_id
    AND o.year = act.year
    AND o.period = act.period
 
--- LEFT JOIN 3: TARGET CALL HARIAN
 LEFT JOIN cte_target_call tc
     ON o.distributor_id = tc.distributor_id
    AND o.sls_id = tc.sls_id
    AND act.report_date = tc.report_date
 
--- LEFT JOIN 4: MASTER MAPPER
 LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
     ON COALESCE(act.salesforce_id, o.salesforce_id) = mgc.salesforce_id::varchar
 
 LEFT JOIN raw_ficom_m3.m_group_channels mcs 
-    ON o.channel_id = mcs.channel_id::varchar
+    ON o.channel_id = mcs.channel_id::varchar;
