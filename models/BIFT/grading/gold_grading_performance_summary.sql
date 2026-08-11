@@ -171,4 +171,4 @@ LEFT JOIN cte_facing_item f
    AND s.pcode         = f.pcode
    AND s.year          = f.year
    AND s.period        = f.period
-   AND (s.week = f.week OR s.week = 0);
+   AND (s.week = f.week OR s.week = 0)
