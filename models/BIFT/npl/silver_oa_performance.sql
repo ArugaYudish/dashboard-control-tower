@@ -26,10 +26,10 @@
 --   Stream A (non_purchasing_rows) — 1 row per CB Cover outlet per PERIOD.
 --                                    week / date / pcode / metrics are NULL / 0.
 --   Stream B (trx_rows)           — 1 row per invoice LINE per DAY.
---                                    week from vd.week_no, periode from vd.week_prd.
+--                                    week from vd.week_no, periode from vd.prd_no.
 --
 -- Joins    : CB Cover (dim_fcustsls_staging INNER JOIN dim_salesman_hierarchy)
---            LEFT JOIN vfsales_det (sts='905') — week_prd/week_no used directly
+--            LEFT JOIN vfsales_det (sts='905') — prd_no/week_no used directly
 --            LEFT JOIN dim_product (product hierarchy + carton conversion)
 --
 -- Filters  : tahun = var('tahun', 2026)   [CB Cover + trx]
@@ -111,7 +111,7 @@ cb_cover AS (
 
 -- ---------------------------------------------------------------------------
 -- STEP 2 : Transactions — raw_ho.vfsales_det filtered to approved invoices.
---          vd.week_prd  = period number   → mapped as: periode
+--          vd.prd_no    = period number   → mapped as: periode
 --          vd.week_no   = cycle week      → mapped as: week
 --          tahun derived from EXTRACT(YEAR FROM ord_date) — no m_cycle3 join.
 --          Product hierarchy enriched via LEFT JOIN dim_product.
@@ -122,7 +122,7 @@ trx AS (
         vd.slsno                                         AS sls_id,
         vd.custno                                        AS cust_id,
         EXTRACT(YEAR FROM vd.ord_date::date)::numeric    AS tahun,
-        vd.week_prd::numeric                             AS periode, -- period from vfsalesdet
+        vd.prd_no::numeric                               AS periode, -- period from vfsalesdet
         vd.week_no::numeric                              AS week,    -- cycle week from vfsalesdet
         vd.ord_date::date                                AS date,
         vd.inv_date::date                                AS inv_date,
