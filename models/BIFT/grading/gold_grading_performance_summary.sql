@@ -37,33 +37,7 @@ cte_master_outlet_silver AS (
 ),
 
 ----------------------------------------------------------------------
--- 2. TARGET CALL (NMRC SUBDETAIL) - LEVEL SALESMAN + TANGGAL/WEEK/PERIODE
-----------------------------------------------------------------------
-cte_nmrc_tgt_call AS (
-    SELECT 
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        tgl::date AS report_date,
-        tahun::int AS year,
-        periode::int AS period,
-        week::int AS week,
-        SUM(COALESCE(tgt_call::numeric, 0)) AS tgt_call,
-        SUM(COALESCE(tcall_glb::numeric, 0)) AS tcall_glb,
-        SUM(COALESCE(rcall_kpl::numeric, 0)) AS rcall_kpl,
-        SUM(COALESCE(ec_kpl::numeric, 0)) AS ec_kpl
-    FROM raw_ficom_m3.m_nmrc_subdetail
-    WHERE tgl >= '2025-01-01'
-    GROUP BY 
-        distributor_id::varchar,
-        sls_id::varchar,
-        tgl::date,
-        tahun::int,
-        periode::int,
-        week::int
-),
-
-----------------------------------------------------------------------
--- 3. ALL ACTIVITY & IR PCODE (GOLD GRADING DASHBOARD - MAIN DATA)
+-- 2. ALL ACTIVITY & IR PCODE (GOLD GRADING DASHBOARD - MAIN DATA)
 ----------------------------------------------------------------------
 cte_grading_dashboard AS (
     SELECT 
@@ -96,18 +70,42 @@ cte_grading_dashboard AS (
         is_ec_avis,
         anomaly_status
     FROM {{ ref('gold_grading_dashboard') }}
+),
+
+----------------------------------------------------------------------
+-- 3. TARGET CALL (NMRC SUBDETAIL) - HANYA FILTER TAHUN BERJALAN
+----------------------------------------------------------------------
+cte_nmrc_tgt_call AS (
+    SELECT 
+        distributor_id::varchar AS distributor_id,
+        sls_id::varchar AS sls_id,
+        tgl::date AS report_date,
+        tahun::int AS year,
+        periode::int AS period,
+        MAX(tgt_call::numeric) AS tgt_call,
+        MAX(tcall_glb::numeric) AS tcall_glb,
+        MAX(rcall_kpl::numeric) AS rcall_kpl,
+        MAX(ec_kpl::numeric) AS ec_kpl
+    FROM raw_ficom_m3.m_nmrc_subdetail
+    WHERE tgl >= '2026-01-01'
+    GROUP BY 
+        distributor_id::varchar,
+        sls_id::varchar,
+        tgl::date,
+        tahun::int,
+        periode::int
 )
 
 ----------------------------------------------------------------------
--- MAIN QUERY SUMMARY
+-- MAIN QUERY SUMMARY (FAST INDEX JOIN)
 ----------------------------------------------------------------------
 SELECT 
-    COALESCE(g.year, s.year, nm.year) AS year,
-    COALESCE(g.period, s.period, nm.period) AS period,
-    COALESCE(g.week, nm.week) AS week,
+    COALESCE(g.year, s.year) AS year,
+    COALESCE(g.period, s.period) AS period,
+    g.week,
     
     -- DATES
-    COALESCE(g.report_date, nm.report_date) AS report_date,
+    g.report_date,
     g.visit_date,
     g.inv_date,
     
@@ -117,14 +115,14 @@ SELECT
     s.grsm_id, s.grsm_nm,
     s.rsm_id, s.rsm_nm,
     s.ss_id, s.ss_nm,
-    COALESCE(g.distributor_id, s.distributor_id, nm.distributor_id) AS distributor_id,
+    COALESCE(g.distributor_id, s.distributor_id) AS distributor_id,
     COALESCE(s.distributor_nm, 'UNKNOWN') AS distributor_nm,
     COALESCE(g.outlet_id, s.outlet_id) AS outlet_id,
     COALESCE(s.cust_nm, 'UNKNOWN OUTLET') AS cust_nm,
     s.city,
     
     -- ATRIBUT IR & SALESMAN
-    COALESCE(g.sls_id, nm.sls_id) AS sls_id,
+    g.sls_id,
     g.sls_nm,
     g.pcode,
     g.pcode_nm,
@@ -141,8 +139,8 @@ SELECT
     COALESCE(g.facing_qty, 0) AS facing_qty,
     
     -- 🎯 METRICS PEMBAGI (%) UNTUK METABASE
-    1 AS is_cb_master, -- Dipakai kalau filter PERIODE/BULANAN
-    COALESCE(nm.tgt_call, 0) AS tgt_call_nmrc, -- Dipakai kalau filter DAILY / WEEKLY
+    1 AS is_cb_master,
+    COALESCE(nm.tgt_call, 0) AS tgt_call_nmrc,
     COALESCE(nm.tcall_glb, 0) AS tcall_glb_nmrc,
     COALESCE(nm.rcall_kpl, 0) AS rcall_kpl_nmrc,
     COALESCE(nm.ec_kpl, 0) AS ec_kpl_nmrc,
@@ -163,8 +161,6 @@ FULL OUTER JOIN cte_grading_dashboard g
    AND s.year           = g.year
    AND s.period         = g.period
 LEFT JOIN cte_nmrc_tgt_call nm
-    ON COALESCE(g.distributor_id, s.distributor_id) = nm.distributor_id
-   AND COALESCE(g.sls_id, nm.sls_id)                = nm.sls_id
-   AND COALESCE(g.year, s.year)                     = nm.year
-   AND COALESCE(g.period, s.period)                 = nm.period
-   AND COALESCE(g.report_date, nm.report_date)      = nm.report_date
+    ON g.distributor_id = nm.distributor_id
+   AND g.sls_id         = nm.sls_id
+   AND g.report_date    = nm.report_date
