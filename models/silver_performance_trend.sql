@@ -11,9 +11,8 @@ with cycle_week as materialized (
       when year = extract(year from current_date) - 1 then 'ly'
     end as flag,'param' as param
   from spx.m_cycle3
-  where (year * 12 + period)
-    between (extract(year from current_date) * 12 + extract(month from current_date)) - 6
-        and (extract(year from current_date) * 12 + extract(month from current_date))
+  where year = extract(year from current_date)
+  and period between 1 and extract(month from current_date) - 1
 ),
 product_hierarchy as (
   select distinct
@@ -101,7 +100,7 @@ fdos as (
 ),
 sales as
 (
-	select 	stm.year, stm.period, stm.parent_id, sum(stm_qty) as stm_qty, sum(salfo_qty) as salfo_qty
+  select 	stm.year, stm.period, stm.parent_id, sum(stm_qty) as stm_qty, sum(salfo_qty) as salfo_qty
 	from 
 	(	
 		select year, week, period, parent_id, qty as stm_qty 

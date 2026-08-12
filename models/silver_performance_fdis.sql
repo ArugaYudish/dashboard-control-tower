@@ -11,9 +11,9 @@ with cycle_week as materialized (
       when year = extract(year from current_date) - 1 then 'ly'
     end as flag,'param' as param
   from spx.m_cycle3
-  where (year * 12 + period)
-    between (extract(year from current_date) * 12 + extract(month from current_date)) - 6
-        and (extract(year from current_date) * 12 + extract(month from current_date))
+  where year = (extract(year from current_date)) 
+  	and period between 1 and extract(month from current_date)
+  	and year::text||LPAD(week::text,2,'0') <= (select max(year::text||LPAD(week::text,2,'0')) as yearWeek from spx.v_fdis_actual)
 ),
 product_hierarchy as (
   select distinct
@@ -39,7 +39,7 @@ fdis as (
   from spx.v_fdis_update vfu
   join cycle_week cw
     on cw.year = vfu.year
-   and cw.week = vfu.week
+   and cw.week = vfu.week   
   left join spx.v_fdis_actual vfa
     on  vfa.week   = vfu.week
     and vfa.period = cw.period
@@ -47,7 +47,7 @@ fdis as (
     and vfa.wh_id  = vfu.wh_id
     and vfa.pcode  = vfu.pcode
   left join spx.m_product p
-    on p.pcode = vfu.pcode
+    on p.pcode = vfu.pcode  
   group by cw.period, cw.periodName, vfu.year, vfu.week, p.parent_id
 ),
 fdis_actual as (
