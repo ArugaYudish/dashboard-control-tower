@@ -61,7 +61,7 @@ staging_with_max_date AS (
     SELECT
         *,
         MAX(upd_date) OVER (
-            PARTITION BY source_schema, distributor_id, tahun, periode
+            PARTITION BY source_schema, distributor_id, cust_id, sls_id, tahun, periode
         ) AS upd_date_terakhir
     FROM combined_staging
     WHERE flag_aktif = 'Y'
