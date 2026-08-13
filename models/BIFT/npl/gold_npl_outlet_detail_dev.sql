@@ -228,7 +228,7 @@ purchasing AS (
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
     GROUP BY
-        s.source_schema, s.tahun, s.periode, s.week, s.date,
+        s.source_schema, s.tahun, s.periode, s.week, s.inv_date,
         s.gdiv_id, s.gdiv_nm,
         s.sd_id, s.sd_nm, s.nsm_id, s.nsm_nm, s.grsm_id, s.grsm_nm,
         s.rsm_id, s.rsm_nm, s.ss_id, s.ss_nm, s.distributor_id, s.distributor_nm,
