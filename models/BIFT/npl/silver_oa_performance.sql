@@ -3,7 +3,6 @@
         schema='bift',
         materialized='table',
         alias='silver_oa_performance',
-        pre_hook="SET LOCAL work_mem = '512MB';",
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id'],         'type': 'btree'},
           {'columns': ['tahun', 'periode', 'sls_id'],                 'type': 'btree'},
