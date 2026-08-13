@@ -29,9 +29,6 @@ WITH outlet_orders AS (
 
     FROM default.gold_npl_outlet_detail_dev
     WHERE 1=1
-      [[ AND {{tahun}} ]]
-      [[ AND {{periodes}} ]]
-      [[ AND {{weeks}} ]]
       [[ AND {{gdiv_ids}} ]]
       [[ AND {{sd_ids}} ]]
       [[ AND {{nsm_ids}} ]]
@@ -46,6 +43,19 @@ WITH outlet_orders AS (
       [[ AND {{channel_ids}} ]]
       [[ AND {{sls_ids}} ]]
       [[ AND {{classification_ids}} ]]
+      AND (
+          (is_transaction = 0 AND (tahun, periode) IN (
+              SELECT DISTINCT toUInt16(year), toUInt8(period)
+              FROM default.m_cycle3
+              WHERE 1=1 [[ AND {{date}} ]]
+          ))
+          OR
+          (is_transaction = 1 AND (tahun, periode, week) IN (
+              SELECT DISTINCT toUInt16(year), toUInt8(period), toUInt8(week)
+              FROM default.m_cycle3
+              WHERE 1=1 [[ AND {{date}} ]]
+          ))
+      )
 
     GROUP BY
         dist_cust_key, "View By"

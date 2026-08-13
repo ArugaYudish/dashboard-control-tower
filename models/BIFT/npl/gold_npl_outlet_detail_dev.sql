@@ -137,7 +137,7 @@ purchasing AS (
         COALESCE(s.tahun, 0)                                                            AS tahun,
         COALESCE(s.periode, 0)                                                          AS periode,
         COALESCE(s.week, 0)                                                             AS week,
-        s.date                                                                          AS date,
+        s.inv_date                                                                      AS date,
 
         -- Grand Division
         COALESCE(s.gdiv_id, '')                                                         AS gdiv_id,
@@ -245,5 +245,3 @@ purchasing AS (
 SELECT * FROM non_purchasing
 UNION ALL
 SELECT * FROM purchasing
-
-

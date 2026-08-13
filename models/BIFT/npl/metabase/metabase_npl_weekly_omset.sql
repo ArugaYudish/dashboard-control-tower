@@ -23,9 +23,6 @@ SELECT
 
 FROM default.gold_npl_outlet_detail_dev
 WHERE is_transaction = 1
-  [[ AND {{tahun}} ]]
-  [[ AND {{periodes}} ]]
-  [[ AND {{weeks}} ]]
   [[ AND {{gdiv_ids}} ]]
   [[ AND {{sd_ids}} ]]
   [[ AND {{nsm_ids}} ]]
@@ -42,6 +39,11 @@ WHERE is_transaction = 1
   [[ AND {{classification_ids}} ]]
   [[ AND {{pcodes}} ]]
   [[ AND {{subbrands}} ]]
+  AND (tahun, periode, week) IN (
+      SELECT DISTINCT toUInt16(year), toUInt8(period), toUInt8(week)
+      FROM default.m_cycle3
+      WHERE 1=1 [[ AND {{date}} ]]
+  )
 
 GROUP BY
     "SD", "NSM", "GRSM", "RSM", "SS", "Distributor", "Break By", week

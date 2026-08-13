@@ -26,9 +26,6 @@ WITH outlet_stats AS (
 
     FROM default.gold_npl_outlet_detail_dev
     WHERE 1=1
-      [[ AND {{tahun}} ]]
-      [[ AND {{periodes}} ]]
-      [[ AND {{weeks}} ]]
       [[ AND {{gdiv_ids}} ]]
       [[ AND {{sd_ids}} ]]
       [[ AND {{nsm_ids}} ]]
@@ -44,6 +41,19 @@ WITH outlet_stats AS (
       [[ AND {{sls_ids}} ]]
       [[ AND {{classification_ids}} ]]
       [[ AND {{cust_ids}} ]]
+      AND (
+          (is_transaction = 0 AND (tahun, periode) IN (
+              SELECT DISTINCT toUInt16(year), toUInt8(period)
+              FROM default.m_cycle3
+              WHERE 1=1 [[ AND {{date}} ]]
+          ))
+          OR
+          (is_transaction = 1 AND (tahun, periode, week) IN (
+              SELECT DISTINCT toUInt16(year), toUInt8(period), toUInt8(week)
+              FROM default.m_cycle3
+              WHERE 1=1 [[ AND {{date}} ]]
+          ))
+      )
 
     GROUP BY
         "Distributor", "Outlet", "Salesman", "Channel", dist_sls_cust_key
