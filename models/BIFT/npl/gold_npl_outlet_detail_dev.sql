@@ -11,7 +11,8 @@
           {'columns': ['is_transaction'], 'type': 'btree'},
           {'columns': ['sls_id'], 'type': 'btree'},
           {'columns': ['classification_id'], 'type': 'btree'},
-          {'columns': ['gdiv_id'], 'type': 'btree'}
+          {'columns': ['gdiv_id'], 'type': 'btree'},
+          {'columns': ['date'], 'type': 'btree'}
         ]
     )
 }}
@@ -19,24 +20,17 @@
 -- DEV/TESTING ONLY: Direct Gold Outlet Detail Model (tahun = 2026)
 -- Built from Silver OA Performance (silver_oa_performance).
 -- Pre-formats all _nm columns as "ID - Name" (or '' if ID is null/empty).
--- Guaranteed 100% NULL-FREE across all columns.
-
-WITH week_bridge AS (
-    SELECT DISTINCT
-        COALESCE("year"::numeric, 0)     AS tahun,
-        COALESCE("period"::numeric, 0)   AS periode,
-        COALESCE(week::numeric, 0)       AS week
-    FROM spx.m_cycle3
-    WHERE "year"::numeric   = 2026
-),
+-- Stream A (non_purchasing): 1 row per CB outlet per period (week = NULL, date = NULL).
+-- Stream B (purchasing): 1 row per outlet per product per transaction date (date = s.date, week = s.week).
 
 -- Stream A: Non-purchasing Outlets from Silver OA Performance
-non_purchasing AS (
+WITH non_purchasing AS (
     SELECT
         COALESCE(s.source_schema, '')                                                   AS source_schema,
         COALESCE(s.tahun, 0)                                                            AS tahun,
         COALESCE(s.periode, 0)                                                          AS periode,
-        COALESCE(wb.week, 0)                                                            AS week,
+        NULL::numeric                                                                   AS week,
+        NULL::date                                                                      AS date,
 
         -- Grand Division
         COALESCE(s.gdiv_id, '')                                                         AS gdiv_id,
@@ -117,16 +111,13 @@ non_purchasing AS (
         WHERE is_transaction = 0
           AND tahun          = 2026
     ) s
-    INNER JOIN week_bridge wb
-            ON wb.tahun   = s.tahun
-           AND wb.periode = s.periode
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
           AND s.source_schema = 'm2'
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
     GROUP BY
-        s.source_schema, s.tahun, s.periode, wb.week,
+        s.source_schema, s.tahun, s.periode,
         s.gdiv_id, s.gdiv_nm,
         s.sd_id, s.sd_nm, s.nsm_id, s.nsm_nm, s.grsm_id, s.grsm_nm,
         s.rsm_id, s.rsm_nm, s.ss_id, s.ss_nm, s.distributor_id, s.distributor_nm,
@@ -146,6 +137,7 @@ purchasing AS (
         COALESCE(s.tahun, 0)                                                            AS tahun,
         COALESCE(s.periode, 0)                                                          AS periode,
         COALESCE(s.week, 0)                                                             AS week,
+        s.date                                                                          AS date,
 
         -- Grand Division
         COALESCE(s.gdiv_id, '')                                                         AS gdiv_id,
@@ -236,7 +228,7 @@ purchasing AS (
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
     GROUP BY
-        s.source_schema, s.tahun, s.periode, s.week,
+        s.source_schema, s.tahun, s.periode, s.week, s.date,
         s.gdiv_id, s.gdiv_nm,
         s.sd_id, s.sd_nm, s.nsm_id, s.nsm_nm, s.grsm_id, s.grsm_nm,
         s.rsm_id, s.rsm_nm, s.ss_id, s.ss_nm, s.distributor_id, s.distributor_nm,
@@ -253,4 +245,5 @@ purchasing AS (
 SELECT * FROM non_purchasing
 UNION ALL
 SELECT * FROM purchasing
+
 
