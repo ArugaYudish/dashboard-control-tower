@@ -13,6 +13,7 @@
       {'columns': ['grsm_id']},
       {'columns': ['rsm_id']},
       {'columns': ['ss_id']},
+      {'columns': ['distributor_id']},
       {'columns': ['channel']}
     ]
 ) }}
@@ -35,6 +36,7 @@ scoped AS (
     SELECT s.year, s.period, s.channel,
            s.nsm_id, s.nsm_name, s.grsm_id, s.grsm_name,
            s.rsm_id, s.rsm_name, s.ss_id, s.ss_name,
+           s.distributor_id, s.distributor_name,
            s.sbu_id, s.sbu_name, s.brand_id, s.brand_name,
            s.subbrand_id, s.subbrand_name, s.parent_id, s.parent_name,
            s.salfo_qty, s.stm_qty
@@ -64,6 +66,7 @@ scoped AS (
     SELECT t.year, t.period, t.channel,
            t.nsm_id, t.nsm_name, t.grsm_id, t.grsm_name,
            t.rsm_id, t.rsm_name, t.ss_id, t.ss_name,
+           t.distributor_id, t.distributor_name,
            t.sbu_id, t.sbu_name, t.brand_id, t.brand_name,
            t.subbrand_id, t.subbrand_name, t.parent_id, t.parent_name,
            t.salfo_qty, t.stm_qty
@@ -72,6 +75,7 @@ scoped AS (
                SUM(s.stm_qty) OVER (
                    PARTITION BY s.year, s.period, s.week, s.channel,
                                 s.nsm_id, s.grsm_id, s.rsm_id, s.ss_id,
+                                s.distributor_id,
                                 s.sbu_id, s.brand_id, s.subbrand_id, s.parent_id
                ) AS slice_week_stm
         FROM {{ ref('silver_sales_performance_parent') }} s
@@ -104,6 +108,13 @@ agg AS (
     -- unik global). MIN(name) karena itu memilih dari satu nilai saja ->
     -- baris hasil identik, tapi hash key menyusut jadi 10 kolom.
     --
+    -- distributor_id menyusul sebagai kunci grouping. Silver sudah bergrain
+    -- distributor, jadi ini hanya memecah baris yang sudah ada -- total_forecast
+    -- dan total_actual identik kalau di-agregasi ulang tanpa distributor.
+    -- distributor_name aman ikut pola MIN(name) yang sama: silver mengambilnya
+    -- lewat join langsung ke spx.m_distributor pada distributor_id, jadi
+    -- dependensi fungsionalnya by construction, bukan kebetulan data.
+    --
     -- total_actual tidak berubah sedikit pun oleh gerbang di `scoped`: minggu
     -- tutup tidak disaring sama sekali, dan di minggu berjalan setiap baris
     -- dengan stm_qty non-NULL pasti punya slice_week_stm non-NULL juga. Jadi
@@ -112,12 +123,13 @@ agg AS (
         year::int   AS year,
         period::int AS period,
         channel,
-        nsm_id, grsm_id, rsm_id, ss_id,
+        nsm_id, grsm_id, rsm_id, ss_id, distributor_id,
         sbu_id, brand_id, subbrand_id, parent_id,
         MIN(nsm_name)      AS nsm_name,
         MIN(grsm_name)     AS grsm_name,
         MIN(rsm_name)      AS rsm_name,
         MIN(ss_name)       AS ss_name,
+        MIN(distributor_name) AS distributor_name,
         MIN(sbu_name)      AS sbu_name,
         MIN(brand_name)    AS brand_name,
         MIN(subbrand_name) AS subbrand_name,
@@ -131,7 +143,7 @@ agg AS (
     FROM scoped
     GROUP BY
         year, period, channel,
-        nsm_id, grsm_id, rsm_id, ss_id,
+        nsm_id, grsm_id, rsm_id, ss_id, distributor_id,
         sbu_id, brand_id, subbrand_id, parent_id
 ),
 
@@ -165,6 +177,7 @@ lagged AS (
     FROM agg_seq s
     WINDOW w AS (
         PARTITION BY s.channel, s.nsm_id, s.grsm_id, s.rsm_id, s.ss_id,
+                     s.distributor_id,
                      s.sbu_id, s.brand_id, s.subbrand_id, s.parent_id
         ORDER BY s.seq
     )
@@ -183,6 +196,7 @@ SELECT
     grsm_id, grsm_name,
     rsm_id, rsm_name,
     ss_id, ss_name,
+    distributor_id, distributor_name,
     sbu_id, sbu_name,
     brand_id, brand_name,
     subbrand_id, subbrand_name,
