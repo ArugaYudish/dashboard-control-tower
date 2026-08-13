@@ -138,10 +138,10 @@ salfo as (
 	group by year, week, pg_id, distributor_id
 ),
 stock as (
-	select a.year, a.week, a.distributor_id, a.pg_id, sum(qty) as stock_qty, sum(qty_value) as stock_value
+	select a.year, a.week, a.distributor_id, a.pg_id, sum(qty) as stock_qty, sum(qty_value) as stock_value, SUM(git_qty) as git_qty, sum(git_value) as git_value
 	from
 	(
-	select vss.year, vss.week, vss.sub_id as distributor_id, vss.pcode, pg.pg_id, vss.qty, (vss.qty * mp.price) as qty_value
+	select vss.year, vss.week, vss.sub_id as distributor_id, vss.pcode, pg.pg_id, vss.qty, (vss.qty * mp.price) as qty_value, vss.git_qty, (vss.git_qty * mp.price) as git_value
 	 from spx.v_stock_dist vss inner join cycle_ranked cr on vss.year = cr.year and vss.week = cr.week join pcode_pg pg on vss.pcode = pg.pcode
 			left join spx.m_distributor md on vss.sub_id = md.distributor_id
 			left join spx.m_price_divisi mp on vss.year = mp.year and md.sls_div = mp.sls_div and vss.pcode = mp.pcode
@@ -255,7 +255,8 @@ select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period 
        -- appended last so every existing column position stays stable for Superset.
        -- silver_sales_performance_chart joins prior year on this instead of the five
        -- product-attribute columns: one integer equality, hash-joinable and NULL-free.
-       k.pg_id, case when md.flagdirect = '0' then 'DIRECT' else 'NON DIRECT' end as flag_direct
+       k.pg_id, case when md.flagdirect = '0' then 'DIRECT' else 'NON DIRECT' end as flag_direct,
+       stock.git_qty, stock.git_value
 from all_keys k
 join cycle_ranked cr on cr.year = k.year and cr.week = k.week
 join pg_dim d on d.pg_id = k.pg_id
