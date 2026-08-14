@@ -237,8 +237,10 @@ trx_rows AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- STEP 3B : Non-purchasing stream (Stream A)
---           1 row per CB Cover outlet per PERIOD that has ZERO transactions.
+-- STEP 3B : Master CB stream (Stream A)
+--           1 row per CB Cover outlet per PERIOD (ALL outlets, including
+--           those that transacted). Ensures CB Cover is always 100% complete
+--           regardless of date/week filter downstream.
 --           week / date / pcode / metrics set to NULL / 0 (no week explosion).
 -- ---------------------------------------------------------------------------
 non_purchasing_rows AS (
@@ -310,15 +312,6 @@ non_purchasing_rows AS (
         0                   AS is_transaction
 
     FROM cb_cover cb
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM trx
-        WHERE trx.distributor_id = cb.distributor_id
-          AND trx.sls_id         = cb.sls_id
-          AND trx.cust_id        = cb.cust_id
-          AND trx.tahun          = cb.tahun
-          AND trx.periode        = cb.periode
-    )
 )
 
 -- ---------------------------------------------------------------------------

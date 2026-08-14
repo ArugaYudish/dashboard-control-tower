@@ -20,10 +20,10 @@
 -- DEV/TESTING ONLY: Direct Gold Outlet Detail Model (tahun = 2026)
 -- Built from Silver OA Performance (silver_oa_performance).
 -- Pre-formats all _nm columns as "ID - Name" (or '' if ID is null/empty).
--- Stream A (non_purchasing): 1 row per CB outlet per period (week = NULL, date = NULL).
--- Stream B (purchasing): 1 row per outlet per product per transaction date (date = s.date, week = s.week).
+-- Stream A (non_purchasing): Master CB — 1 row per ALL CB outlets per period (week = NULL, date = NULL).
+-- Stream B (purchasing): 1 row per outlet per product per transaction date (date = s.inv_date, week = s.week).
 
--- Stream A: Non-purchasing Outlets from Silver OA Performance
+-- Stream A: Master CB — ALL Registered Outlets from Silver OA Performance
 WITH non_purchasing AS (
     SELECT
         COALESCE(s.source_schema, '')                                                   AS source_schema,
