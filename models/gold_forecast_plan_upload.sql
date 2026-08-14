@@ -92,8 +92,8 @@ sales_hierarchy as (
   order by pg_id, distributor_id, ss_id nulls last
 ),
 
--- sub_id is the distributor key in the logistic header tables, the same way v_stock_dist
--- exposes it. m_distributor is joined INNER so channel is never NULL, matching
+-- sub_id is t_fdos_h's distributor key, the same way v_stock_dist exposes it.
+-- m_distributor is joined INNER so channel is never NULL, matching
 -- silver_sales_performance_parent.
 fdos as (
   select f.year_upload, f.period_upload, f.year, f.period,
@@ -139,15 +139,18 @@ fdis as (
   group by k.year_upload, k.period_upload, k.year, k.period, k.channel, pg.pg_id
 ),
 
+-- v_t_salfo_confirm_h is the pre-trimmed replica of the source header: it already exposes
+-- distributor_id directly (no sub_id rename needed) and drops type_id / ct_id / wh_id /
+-- buyer_id / plant_id, so unlike fdos there is no fan-out being summed over here.
 salfo as (
   select s.year_upload, s.period_upload, s.year, s.period,
-         md.sls_div as channel, pg.pg_id, s.sub_id as distributor_id,
+         md.sls_div as channel, pg.pg_id, s.distributor_id,
          sum(coalesce(s.qty, 0)) as salfo
-  from spx.t_salfo_confirm_h s
+  from spx.v_t_salfo_confirm_h s
   join pcode_pg pg on pg.pcode = s.pcode
-  join spx.m_distributor md on md.distributor_id = s.sub_id
+  join spx.m_distributor md on md.distributor_id = s.distributor_id
   where s.year_upload >= extract(year from current_date) - 1
-  group by s.year_upload, s.period_upload, s.year, s.period, md.sls_div, pg.pg_id, s.sub_id
+  group by s.year_upload, s.period_upload, s.year, s.period, md.sls_div, pg.pg_id, s.distributor_id
 ),
 
 -- Stacked long-form rather than a `union` key spine + three left joins: distributor_id is
