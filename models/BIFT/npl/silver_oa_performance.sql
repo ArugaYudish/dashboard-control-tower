@@ -151,11 +151,15 @@ trx AS (
         f.sbu_id,
         f.sbu_nm
 
-    FROM (select * from spx.vfsales_det where week_no IN (17, 18, 19)) as vd
+    FROM (
+        SELECT *
+        FROM spx.vfsales_det
+        WHERE week_no IN (17, 18, 19)
+        and sts = '905'
+        and "year" = 2026
+    ) as vd
     LEFT JOIN bift.dim_product f
            ON vd.pcode = f.pcode
-    WHERE vd.sts = '905'
-      AND EXTRACT(YEAR FROM vd.ord_date::date)::numeric = {{ var('tahun', 2026) }}
 ),
 
 -- ---------------------------------------------------------------------------
