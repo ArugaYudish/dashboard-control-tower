@@ -109,7 +109,7 @@ cb_cover AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- STEP 2 : Transactions — raw_ho.vfsales_det filtered to approved invoices.
+-- STEP 2 : Transactions — spx.vfsales_det filtered to approved invoices.
 --          vd.prd_no    = period number   → mapped as: periode
 --          vd.week_no   = cycle week      → mapped as: week
 --          tahun derived from EXTRACT(YEAR FROM ord_date) — no m_cycle3 join.
@@ -151,7 +151,7 @@ trx AS (
         f.sbu_id,
         f.sbu_nm
 
-    FROM raw_ho.vfsales_det vd
+    FROM (select * from spx.vfsales_det where week_no IN (17, 18, 19)) as vd
     LEFT JOIN bift.dim_product f
            ON vd.pcode = f.pcode
     WHERE vd.sts = '905'
