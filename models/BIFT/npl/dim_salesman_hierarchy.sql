@@ -35,6 +35,11 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m1.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+    JOIN raw_ficom_m1.dim_sls_termin t
+      ON t.spv_id = h.ss_id
+     AND t.sls_id = c.sls_id
+     AND t.distributor_id = c.distributor_id
+     AND t.termin_date = 'Active'
 
     UNION ALL
 
@@ -60,6 +65,11 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m2.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+    JOIN raw_ficom_m2.dim_sls_termin t
+      ON t.spv_id = h.ss_id
+     AND t.sls_id = c.sls_id
+     AND t.distributor_id = c.distributor_id
+     AND t.termin_date = 'Active'
 
     UNION ALL
 
@@ -85,6 +95,11 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m3.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+    JOIN raw_ficom_m3.dim_sls_termin t
+      ON t.spv_id = h.ss_id
+     AND t.sls_id = c.sls_id
+     AND t.distributor_id = c.distributor_id
+     AND t.termin_date = 'Active'
 )
 SELECT 
     h.source_schema,
