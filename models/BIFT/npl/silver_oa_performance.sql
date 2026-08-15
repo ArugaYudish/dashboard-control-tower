@@ -153,10 +153,7 @@ trx AS (
 
     FROM (
         SELECT *
-        FROM spx.vfsales_det
-        WHERE week_no IN (17, 18, 19)
-        and sts = '905'
-        and "year" = 2026
+        FROM bift.mv_fsales_det
     ) as vd
     LEFT JOIN bift.dim_product f
            ON vd.pcode = f.pcode
