@@ -106,6 +106,10 @@ cb_cover AS (
            AND cs.sls_id         = sh.sls_id
            AND cs.source_schema  = sh.source_schema
     WHERE cs.tahun = {{ var('tahun', 2026) }}
+      AND (
+          sh.termin_year IS NULL
+          OR (cs.tahun * 100 + cs.periode) <= (sh.termin_year * 100 + sh.termin_period)
+      )
 ),
 
 -- ---------------------------------------------------------------------------

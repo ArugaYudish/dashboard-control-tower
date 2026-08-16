@@ -18,6 +18,8 @@ WITH outlet_orders AS (
             WHEN {{view_by}} = 'classification' THEN nullIf(classification_nm, '')
         END                                                                 AS "View By",
 
+        max(CASE WHEN is_transaction = 0 THEN 1 ELSE 0 END)                AS is_cb_cover,
+
         sum(
             CASE
                 WHEN 1=1
@@ -45,9 +47,11 @@ WITH outlet_orders AS (
       [[ AND {{classification_ids}} ]]
       AND (
           (is_transaction = 0 AND (tahun, periode) IN (
-              SELECT DISTINCT toUInt16(year), toUInt8(period)
+              SELECT toUInt16(year), toUInt8(period)
               FROM default.m_cycle3
               WHERE 1=1 [[ AND {{date}} ]]
+              ORDER BY toUInt16(year) DESC, toUInt8(period) DESC
+              LIMIT 1
           ))
           OR
           (is_transaction = 1 AND (tahun, periode, week) IN (
@@ -64,10 +68,10 @@ WITH outlet_orders AS (
 SELECT
     "View By",
 
-    uniqExact(dist_cust_key)                                                        AS "CB",
+    uniqExactIf(dist_cust_key, is_cb_cover = 1)                                    AS "CB",
     uniqExactIf(dist_cust_key, pcode_order_count >= 1)                             AS "OA",
     round(
-        (uniqExactIf(dist_cust_key, pcode_order_count >= 1) / nullIf(uniqExact(dist_cust_key), 0)) * 100, 2
+        (uniqExactIf(dist_cust_key, pcode_order_count >= 1) / nullIf(uniqExactIf(dist_cust_key, is_cb_cover = 1), 0)) * 100, 2
     )                                                                               AS "%OA",
 
     uniqExactIf(dist_cust_key, pcode_order_count = 1)                              AS "T1",

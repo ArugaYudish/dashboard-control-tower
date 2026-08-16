@@ -12,7 +12,15 @@
     )
 }}
 
-WITH combined_hierarchy AS (
+WITH cycle_lookup AS (
+    SELECT
+        cdate::date AS cycle_date,
+        year::int   AS period_year,
+        period::int AS period_num
+    FROM spx.m_cycle3
+),
+
+combined_hierarchy AS (
     SELECT DISTINCT
         'm1' AS source_schema,
         h.sd_id,
@@ -27,6 +35,9 @@ WITH combined_hierarchy AS (
         h.ss_nm,
         c.distributor_id,
         c.sls_id,
+        COALESCE(t.termin_date, 'Active') AS termin_date,
+        mc.period_year                    AS termin_year,
+        mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
     FROM raw_ficom_m1.v_salesman_hierarchy h
     JOIN raw_ficom_m1.m_employee e
@@ -35,11 +46,22 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m1.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
-    JOIN raw_ficom_m1.dim_sls_termin t
+    LEFT JOIN (
+        SELECT DISTINCT ON (spv_id, sls_id, distributor_id)
+            spv_id, sls_id, distributor_id, termin_date
+        FROM raw_ficom_m1.dim_sls_termin
+        ORDER BY spv_id, sls_id, distributor_id, 
+                 CASE WHEN LOWER(termin_date) = 'active' THEN 1 ELSE 2 END,
+                 termin_date DESC
+    ) t
       ON t.spv_id = h.ss_id
      AND t.sls_id = c.sls_id
      AND t.distributor_id = c.distributor_id
-     AND t.termin_date = 'Active'
+    LEFT JOIN cycle_lookup mc
+      ON mc.cycle_date = CASE 
+          WHEN t.termin_date IS NOT NULL AND LOWER(t.termin_date) != 'active'
+          THEN t.termin_date::date
+      END
 
     UNION ALL
 
@@ -57,6 +79,9 @@ WITH combined_hierarchy AS (
         h.ss_nm,
         c.distributor_id,
         c.sls_id,
+        COALESCE(t.termin_date, 'Active') AS termin_date,
+        mc.period_year                    AS termin_year,
+        mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
     FROM raw_ficom_m2.v_salesman_hierarchy h
     JOIN raw_ficom_m2.m_employee e
@@ -65,11 +90,22 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m2.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
-    JOIN raw_ficom_m2.dim_sls_termin t
+    LEFT JOIN (
+        SELECT DISTINCT ON (spv_id, sls_id, distributor_id)
+            spv_id, sls_id, distributor_id, termin_date
+        FROM raw_ficom_m2.dim_sls_termin
+        ORDER BY spv_id, sls_id, distributor_id, 
+                 CASE WHEN LOWER(termin_date) = 'active' THEN 1 ELSE 2 END,
+                 termin_date DESC
+    ) t
       ON t.spv_id = h.ss_id
      AND t.sls_id = c.sls_id
      AND t.distributor_id = c.distributor_id
-     AND t.termin_date = 'Active'
+    LEFT JOIN cycle_lookup mc
+      ON mc.cycle_date = CASE 
+          WHEN t.termin_date IS NOT NULL AND LOWER(t.termin_date) != 'active'
+          THEN t.termin_date::date
+      END
 
     UNION ALL
 
@@ -87,6 +123,9 @@ WITH combined_hierarchy AS (
         h.ss_nm,
         c.distributor_id,
         c.sls_id,
+        COALESCE(t.termin_date, 'Active') AS termin_date,
+        mc.period_year                    AS termin_year,
+        mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
     FROM raw_ficom_m3.v_salesman_hierarchy h
     JOIN raw_ficom_m3.m_employee e
@@ -95,11 +134,22 @@ WITH combined_hierarchy AS (
     JOIN raw_ficom_m3.m_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
-    JOIN raw_ficom_m3.dim_sls_termin t
+    LEFT JOIN (
+        SELECT DISTINCT ON (spv_id, sls_id, distributor_id)
+            spv_id, sls_id, distributor_id, termin_date
+        FROM raw_ficom_m3.dim_sls_termin
+        ORDER BY spv_id, sls_id, distributor_id, 
+                 CASE WHEN LOWER(termin_date) = 'active' THEN 1 ELSE 2 END,
+                 termin_date DESC
+    ) t
       ON t.spv_id = h.ss_id
      AND t.sls_id = c.sls_id
      AND t.distributor_id = c.distributor_id
-     AND t.termin_date = 'Active'
+    LEFT JOIN cycle_lookup mc
+      ON mc.cycle_date = CASE 
+          WHEN t.termin_date IS NOT NULL AND LOWER(t.termin_date) != 'active'
+          THEN t.termin_date::date
+      END
 )
 SELECT 
     h.source_schema,
@@ -155,7 +205,12 @@ SELECT
     sm.salesforce_div_nm,
     sm.salesforce_nm,
     sm.gsalesforce_id,
-    sm.gsalesforce_nm
+    sm.gsalesforce_nm,
+
+    -- 8. Salesman Termination Metadata (from dim_sls_termin + spx.m_cycle3)
+    h.termin_date,
+    h.termin_year,
+    h.termin_period
 
 FROM combined_hierarchy h
 LEFT JOIN bift.dim_salesman sm
@@ -163,3 +218,4 @@ LEFT JOIN bift.dim_salesman sm
       AND h.sls_id        = sm.sls_id
 LEFT JOIN spx.m_distributor md
         ON md.distributor_id = h.distributor_id
+
