@@ -152,7 +152,6 @@ LEFT JOIN spx.m_cycle3 mc_bill
   ON mc_bill.cdate::date = TO_DATE(NULLIF(t.tgl_billing, '00.00.0000'), 'DD.MM.YYYY')
 LEFT JOIN spx.m_cycle3 mc_so
   ON mc_so.cdate::date = TO_DATE(NULLIF(t.tgl_so, '00.00.0000'), 'DD.MM.YYYY')
-WHERE t.tgl_billing != '00.00.0000'
 )
 SELECT
   fc.*,
