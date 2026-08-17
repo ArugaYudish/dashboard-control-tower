@@ -8,31 +8,18 @@ WITH override_purwosari_locations (purwosari_subdist, purwosari_plant) AS (
          ('176802', 'Purwosari'),
          ('185001', 'Purwosari')
 ),
+-- so_awal / so_confirm / qty_bill sudah bertipe numeric di v_sl_subdist, dan
+-- pembersihan pemisah ribuan ('1.700' -> 1700) dilakukan di view tersebut,
+-- bukan di sini. Model ini cuma menyeragamkan NULL -> 0 supaya aritmatika
+-- di bawah tidak menghasilkan NULL.
 parsed_t_sl_subdist AS (
   SELECT
     t.*,
-    COALESCE(
-      SUBSTRING(
-        REPLACE(REPLACE(TRIM(COALESCE(t.so_awal, '')), '.', ''), ',', '.')
-        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
-      )::numeric,
-      0
-    ) AS so_awal_num,
-    COALESCE(
-      SUBSTRING(
-        REPLACE(REPLACE(TRIM(COALESCE(t.so_confirm, '')), '.', ''), ',', '.')
-        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
-      )::numeric,
-      0
-    ) AS so_confirm_num,
-    COALESCE(
-      SUBSTRING(
-        REPLACE(REPLACE(TRIM(COALESCE(t.qty_bill, '')), '.', ''), ',', '.')
-        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
-      )::numeric,
-      0
-    ) AS qty_bill_num
+    COALESCE(t.so_awal, 0)    AS so_awal_num,
+    COALESCE(t.so_confirm, 0) AS so_confirm_num,
+    COALESCE(t.qty_bill, 0)   AS qty_bill_num
   FROM spx.v_sl_subdist t
+  -- hanya ambil ket_week berformat 'XX.' (dua digit minggu + titik)
   WHERE t.ket_week ~ '^[0-9]{2}\.'
 ),
 calculated_t_sl_subdist AS (
