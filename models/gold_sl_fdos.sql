@@ -9,7 +9,7 @@ calculated_t_sl_subdist AS (
   SELECT
     t.*,
     CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill ELSE t.so_awal END AS calculated_so_awal
-  FROM spx.t_sl_subdist t
+  FROM spx.v_sl_subdist t
 ),
 results AS (
   SELECT
