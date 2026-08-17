@@ -1,3 +1,6 @@
+{{ config(materialized='table') }}
+
+
 WITH override_purwosari_locations (purwosari_subdist, purwosari_plant) AS (
   VALUES ('103588', 'Purwosari'),
          ('117300', 'Purwosari'),
