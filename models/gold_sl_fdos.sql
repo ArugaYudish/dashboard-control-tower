@@ -8,11 +8,35 @@ WITH override_purwosari_locations (purwosari_subdist, purwosari_plant) AS (
          ('176802', 'Purwosari'),
          ('185001', 'Purwosari')
 ),
+-- Angka datang sebagai teks berformat Indonesia ('1.700' = seribu tujuh ratus),
+-- jadi titik ribuan dibuang dulu dan koma dijadikan pemisah desimal sebelum di-cast.
+parsed_t_sl_subdist AS (
+  SELECT
+    t.*,
+    CASE
+      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.so_awal, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+      THEN REPLACE(REPLACE(TRIM(t.so_awal), '.', ''), ',', '.')::numeric
+      ELSE 0
+    END AS so_awal_num,
+    CASE
+      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.so_confirm, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+      THEN REPLACE(REPLACE(TRIM(t.so_confirm), '.', ''), ',', '.')::numeric
+      ELSE 0
+    END AS so_confirm_num,
+    CASE
+      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.qty_bill, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
+      THEN REPLACE(REPLACE(TRIM(t.qty_bill), '.', ''), ',', '.')::numeric
+      ELSE 0
+    END AS qty_bill_num
+  FROM spx.v_sl_subdist t
+  -- hanya ambil ket_week berformat 'XX.' (dua digit minggu + titik)
+  WHERE t.ket_week ~ '^[0-9]{2}\.'
+),
 calculated_t_sl_subdist AS (
   SELECT
     t.*,
-    CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill ELSE t.so_awal END AS calculated_so_awal
-  FROM spx.v_sl_subdist t
+    CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal
+  FROM parsed_t_sl_subdist t
 ),
 results AS (
   SELECT
@@ -24,49 +48,50 @@ results AS (
     mmsr.region_id || ma.acc_name AS key1, vsh.grsm_name AS sales_group,
     ttss.plant, ttss.distributor_id AS subdist_id, mdist.distributor_nm, ttss.tgl_so,
     ttss.po_no AS so_no, ttss.ket_week, ttss.sku AS kdbarang, mp.pcodename AS nmbarang,
-    ttss.so_awal, ttss.so_confirm, ttss.tgl_billing, ttss.bill_no, ttss.qty_bill, ttss.reason,
+    ttss.so_awal_num AS so_awal, ttss.so_confirm_num AS so_confirm, ttss.tgl_billing, ttss.bill_no,
+    ttss.qty_bill_num AS qty_bill, ttss.reason,
     ttss.calculated_so_awal,
     CASE WHEN ttss.reason IS NULL THEN 0 ELSE 1 END AS status_reason,
-    CASE WHEN ttss.reason = 'o' AND ttss.qty_bill::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_o,
-    CASE WHEN ttss.reason = 'M' AND ttss.qty_bill::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_m,
-    CASE WHEN ttss.reason IN ('B','W') AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_b,
-    CASE WHEN ttss.reason = 'Z' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_z,
-    CASE WHEN ttss.reason = 'd' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.so_confirm::numeric ELSE 0 END AS result_d,
-    CASE WHEN ttss.reason = 'T' AND ttss.qty_bill::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_t,
-    CASE WHEN ttss.reason = 'Y' AND ttss.qty_bill::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_y,
-    CASE WHEN ttss.reason = 'A' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_a,
-    CASE WHEN ttss.reason = 'P' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_p,
-    CASE WHEN ttss.reason = 'C' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_c,
-    CASE WHEN ttss.reason = 'F' AND ttss.so_confirm::numeric >= 0 THEN ttss.so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_f,
-    CASE WHEN ttss.reason = 'G' AND ttss.so_confirm::numeric >= 0 THEN ttss.so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_g,
-    CASE WHEN ttss.reason = 'K' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.so_confirm::numeric ELSE 0 END AS result_k,
-    CASE WHEN ttss.reason = 'S' AND ttss.so_confirm::numeric >= 0 THEN ttss.so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_s,
-    CASE WHEN ttss.reason = 'X' AND ttss.so_confirm::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_x,
-    CASE WHEN ttss.reason = 'PPN' AND ttss.so_confirm::numeric >= 0 THEN ttss.so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_ppn,
-    CASE WHEN ttss.reason = 'e' AND ttss.qty_bill::numeric >= 0 THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric ELSE 0 END AS result_e,
+    CASE WHEN ttss.reason = 'o' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_o,
+    CASE WHEN ttss.reason = 'M' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_m,
+    CASE WHEN ttss.reason IN ('B','W') AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_b,
+    CASE WHEN ttss.reason = 'Z' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_z,
+    CASE WHEN ttss.reason = 'd' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_d,
+    CASE WHEN ttss.reason = 'T' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_t,
+    CASE WHEN ttss.reason = 'Y' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_y,
+    CASE WHEN ttss.reason = 'A' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_a,
+    CASE WHEN ttss.reason = 'P' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_p,
+    CASE WHEN ttss.reason = 'C' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_c,
+    CASE WHEN ttss.reason = 'F' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_f,
+    CASE WHEN ttss.reason = 'G' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_g,
+    CASE WHEN ttss.reason = 'K' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_k,
+    CASE WHEN ttss.reason = 'S' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_s,
+    CASE WHEN ttss.reason = 'X' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_x,
+    CASE WHEN ttss.reason = 'PPN' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_ppn,
+    CASE WHEN ttss.reason = 'e' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_e,
     CASE
 	  WHEN ttss.reason IS NULL OR ttss.reason = '' THEN ''
 	  WHEN ttss.reason = 'W' THEN 'B'
 	  ELSE ttss.reason
 	END AS new_reason,
     CASE
-	  WHEN ttss.reason = 'U' AND ttss.so_confirm::numeric >= 0 
-	  THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric
+	  WHEN ttss.reason = 'U' AND ttss.so_confirm_num >= 0
+	  THEN ttss.calculated_so_awal - ttss.qty_bill_num
 	  ELSE 0
 	END AS result_u,
-	CASE WHEN ttss.reason = 'W' AND ttss.so_confirm::numeric >= 0 
-     THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric 
-     ELSE 0 
+	CASE WHEN ttss.reason = 'W' AND ttss.so_confirm_num >= 0
+     THEN ttss.calculated_so_awal - ttss.qty_bill_num
+     ELSE 0
 	END AS result_w,
-	CASE WHEN ttss.reason = 'B' AND ttss.so_confirm::numeric >= 0 
-     THEN ttss.calculated_so_awal::numeric - ttss.qty_bill::numeric 
-     ELSE 0 
+	CASE WHEN ttss.reason = 'B' AND ttss.so_confirm_num >= 0
+     THEN ttss.calculated_so_awal - ttss.qty_bill_num
+     ELSE 0
 	END AS result_b_dot,
     CASE
-	  WHEN ttss.so_confirm::numeric = 0 AND ttss.qty_bill::numeric = 0 AND (ttss.reason IS NULL OR ttss.reason = '')
-	  THEN ttss.so_awal::numeric
-	  WHEN (ttss.reason IS NULL OR ttss.reason = '') AND ttss.so_confirm::numeric > 0
-	  THEN ttss.so_awal::numeric - ttss.so_confirm::numeric
+	  WHEN ttss.so_confirm_num = 0 AND ttss.qty_bill_num = 0 AND (ttss.reason IS NULL OR ttss.reason = '')
+	  THEN ttss.so_awal_num
+	  WHEN (ttss.reason IS NULL OR ttss.reason = '') AND ttss.so_confirm_num > 0
+	  THEN ttss.so_awal_num - ttss.so_confirm_num
 	  ELSE 0
 	END AS no_reason,
 	 CASE
@@ -112,14 +137,14 @@ SELECT
   t.result_f, t.result_g, t.result_k, t.result_s, t.result_x, t.result_ppn, t.result_e, t.sum_z_ao,
   CASE
     WHEN t.reason IN ('G','P','S','U')
-      OR (t.calculated_so_awal::numeric - t.so_confirm::numeric - t.result_e - t.sum_z_ao) < 0
+      OR (t.calculated_so_awal - t.so_confirm - t.result_e - t.sum_z_ao) < 0
       OR (t.sum_z_ao + t.result_e) < 0
     THEN 0
-    WHEN t.calculated_so_awal::numeric = 0 AND t.so_confirm::numeric = 0 AND (t.reason IS NULL OR t.reason = '')
-    THEN -t.qty_bill::numeric
-    WHEN t.calculated_so_awal::numeric <> t.so_confirm::numeric
-    THEN t.so_confirm::numeric - t.qty_bill::numeric
-    ELSE t.calculated_so_awal::numeric - t.qty_bill::numeric
+    WHEN t.calculated_so_awal = 0 AND t.so_confirm = 0 AND (t.reason IS NULL OR t.reason = '')
+    THEN -t.qty_bill
+    WHEN t.calculated_so_awal <> t.so_confirm
+    THEN t.so_confirm - t.qty_bill
+    ELSE t.calculated_so_awal - t.qty_bill
   END AS late_bill,
   t.no_reason,
 CASE
@@ -158,8 +183,8 @@ LEFT JOIN spx.m_cycle3 mc_so
 )
 SELECT
   fc.*,
-  CASE WHEN fc.realisasi = 'On Time'     THEN fc.qty_bill::numeric ELSE 0 END AS qty_on_time,
-  CASE WHEN fc.realisasi = 'Not On Time' THEN fc.qty_bill::numeric ELSE 0 END AS qty_not_on_time,
+  CASE WHEN fc.realisasi = 'On Time'     THEN fc.qty_bill ELSE 0 END AS qty_on_time,
+  CASE WHEN fc.realisasi = 'Not On Time' THEN fc.qty_bill ELSE 0 END AS qty_not_on_time,
   CASE
     WHEN fc.realisasi = 'Reason'
     THEN fc.sum_z_ao + fc.result_w + fc.result_b_dot + fc.result_e2 - fc.result_b
@@ -181,7 +206,7 @@ CASE
     WHEN 6 THEN 'Sabtu'
   END
 END AS so_day,
-CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal::numeric ELSE 0 END AS so_awal_fdos,
-CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal::numeric ELSE 0 END AS so_awal_spk,
-CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal::numeric ELSE 0 END AS so_awal_spo
+CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_fdos,
+CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spk,
+CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo
 FROM final_calc fc
