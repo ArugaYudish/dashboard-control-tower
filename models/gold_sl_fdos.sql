@@ -8,28 +8,31 @@ WITH override_purwosari_locations (purwosari_subdist, purwosari_plant) AS (
          ('176802', 'Purwosari'),
          ('185001', 'Purwosari')
 ),
--- Angka datang sebagai teks berformat Indonesia ('1.700' = seribu tujuh ratus),
--- jadi titik ribuan dibuang dulu dan koma dijadikan pemisah desimal sebelum di-cast.
 parsed_t_sl_subdist AS (
   SELECT
     t.*,
-    CASE
-      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.so_awal, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
-      THEN REPLACE(REPLACE(TRIM(t.so_awal), '.', ''), ',', '.')::numeric
-      ELSE 0
-    END AS so_awal_num,
-    CASE
-      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.so_confirm, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
-      THEN REPLACE(REPLACE(TRIM(t.so_confirm), '.', ''), ',', '.')::numeric
-      ELSE 0
-    END AS so_confirm_num,
-    CASE
-      WHEN REPLACE(REPLACE(TRIM(COALESCE(t.qty_bill, '')), '.', ''), ',', '.') ~ '^-?[0-9]+(\.[0-9]+)?$'
-      THEN REPLACE(REPLACE(TRIM(t.qty_bill), '.', ''), ',', '.')::numeric
-      ELSE 0
-    END AS qty_bill_num
+    COALESCE(
+      SUBSTRING(
+        REPLACE(REPLACE(TRIM(COALESCE(t.so_awal, '')), '.', ''), ',', '.')
+        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
+      )::numeric,
+      0
+    ) AS so_awal_num,
+    COALESCE(
+      SUBSTRING(
+        REPLACE(REPLACE(TRIM(COALESCE(t.so_confirm, '')), '.', ''), ',', '.')
+        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
+      )::numeric,
+      0
+    ) AS so_confirm_num,
+    COALESCE(
+      SUBSTRING(
+        REPLACE(REPLACE(TRIM(COALESCE(t.qty_bill, '')), '.', ''), ',', '.')
+        FROM '^-?[0-9]+(?:\.[0-9]+)?$'
+      )::numeric,
+      0
+    ) AS qty_bill_num
   FROM spx.v_sl_subdist t
-  -- hanya ambil ket_week berformat 'XX.' (dua digit minggu + titik)
   WHERE t.ket_week ~ '^[0-9]{2}\.'
 ),
 calculated_t_sl_subdist AS (
@@ -159,20 +162,16 @@ t.result_w,
 t.result_b_dot,
 t.result_e as result_e2,
 t.calculated_so_awal,
-CASE
-  WHEN t.ket_week ~ '^[0-9]{2}\.' THEN LEFT(t.ket_week, 2)
-  ELSE mc_so.week::text
-END AS so_week,
+-- ket_week sudah dijamin berformat 'XX.' oleh filter di parsed_t_sl_subdist,
+-- jadi dua digit pertama selalu angka dan aman di-cast tanpa guard.
+LEFT(t.ket_week, 2) AS so_week,
 CASE
   WHEN t.tgl_billing IS NULL OR t.tgl_billing IN ('', '00.00.0000') THEN 'Reason'
   ELSE mc_bill.week::text
 END AS billing_week,
 CASE
   WHEN t.tgl_billing IS NULL OR t.tgl_billing IN ('', '00.00.0000') THEN 'Reason'
-  WHEN mc_bill.week - COALESCE(
-         CASE WHEN t.ket_week ~ '^[0-9]{2}\.' THEN LEFT(t.ket_week, 2)::numeric END,
-         mc_so.week
-       ) < 1 THEN 'On Time'
+  WHEN mc_bill.week - LEFT(t.ket_week, 2)::numeric < 1 THEN 'On Time'
   ELSE 'Not On Time'
 END AS realisasi
 FROM totals t
