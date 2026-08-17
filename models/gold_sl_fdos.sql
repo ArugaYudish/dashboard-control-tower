@@ -88,7 +88,7 @@ results AS (
   LEFT JOIN spx.m_mapping_subdist_region mmsr ON ttss.distributor_id = mmsr.distributor_id
   LEFT JOIN spx.m_division md ON mp.div_id = md.div_id
   LEFT JOIN spx.m_group_division mgd ON mgd.division_id = mp.div_id
-  LEFT JOIN spx.v_sales_hierarchy vsh ON ttss.distributor_id = vsh.distributor_id and ttss.sku = vsh.pcode
+  LEFT JOIN spx.v_sales_hierarchy_product vsh ON ttss.distributor_id = vsh.distributor_id and ttss.sku = vsh.pcode
   LEFT JOIN spx.m_distributor mdist ON ttss.distributor_id = mdist.distributor_id
   WHERE ma.acc_id NOT IN ('AC0000', 'MT')
 ),
