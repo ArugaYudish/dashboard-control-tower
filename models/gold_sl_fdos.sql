@@ -14,7 +14,7 @@ calculated_t_sl_subdist AS (
 results AS (
   SELECT
     COALESCE(opl.purwosari_plant, mw.wh_nm) AS warehouse_name,
-    mmsr.region_id AS region_code, mmsr.region_nm AS region_nm,
+    mdist.region_id AS region_code, mmsr.region_nm AS region_nm,
     mp.div_id || ' ' || md.div_nm AS division,
     COALESCE(mgd.division_name, 'HOMECARE') AS group_division,
     ma.acc_name AS sls_div,
@@ -85,11 +85,11 @@ results AS (
   JOIN spx.m_acc ma ON mad.acc_id = ma.acc_id
   LEFT JOIN override_purwosari_locations opl ON ttss.distributor_id = opl.purwosari_subdist
   LEFT JOIN spx.m_warehouse mw ON ttss.plant = mw.wh_id
-  LEFT JOIN spx.m_mapping_subdist_region mmsr ON ttss.distributor_id = mmsr.distributor_id
   LEFT JOIN spx.m_division md ON mp.div_id = md.div_id
   LEFT JOIN spx.m_group_division mgd ON mgd.division_id = mp.div_id
   LEFT JOIN spx.v_sales_hierarchy_product vsh ON ttss.distributor_id = vsh.distributor_id and ttss.sku = vsh.pcode
   LEFT JOIN spx.m_distributor mdist ON ttss.distributor_id = mdist.distributor_id
+  LEFT JOIN spx.m_region2 mmsr ON mdist.region_id = mmsr.region_id
   WHERE ma.acc_id NOT IN ('AC0000', 'MT')
 ),
 totals AS (
