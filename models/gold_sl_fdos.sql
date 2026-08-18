@@ -181,9 +181,10 @@ LEFT JOIN spx.m_cycle3 mc_bill
 LEFT JOIN spx.m_cycle3 mc_so
   ON mc_so.cdate::date = TO_DATE(NULLIF(t.tgl_so, '00.00.0000'), 'DD.MM.YYYY')
 LEFT JOIN spx.mapping_subdist_delivery msd on t.subdist_id = msd.distributor_id and t.plant = msd.plant_id 
-)
+),
 -- Kolom final_calc ditulis eksplisit (bukan fc.*) supaya `week` bisa ditaruh
 -- paling kanan. Kalau menambah kolom baru di final_calc, tambahkan juga di sini.
+final_output AS (
 SELECT
   fc.warehouse_name, fc.region_code, fc.region_nm, fc.division, fc.group_division, fc.sls_div, fc.key1,
   fc.sales_group, fc.plant, fc.subdist_id, fc.distributor_nm, fc.tgl_so, fc.so_no, fc.ket_week,
@@ -224,3 +225,110 @@ CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END
 fc.week
 FROM final_calc fc
  left join reason on fc.reason = reason.reason_id
+),
+-- ============================================================================
+-- avg_last_3_week: rata-rata rasio bill vs SO dari 3 week SEBELUM week baris
+-- ini, dihitung per kombinasi week + subdist_id + kdbarang.
+--
+-- Aturan yang dipakai:
+--   * Rasio per week memakai rumus pencapaian yang sama:
+--     SUM(qty_bill) / SUM(so_awal_fdos + so_awal_spk + so_awal_spo) * 100.
+--   * Pembagi rata-rata SELALU 3. Week yang tidak punya data, atau punya data
+--     tapi SO awalnya 0, dihitung sebagai 0%. Jadi week 32 = (p31+p30+p29)/3
+--     walaupun hanya week 31 yang ada datanya.
+--   * Lookback mengikuti kalender lintas tahun: week 01 mengambil week 52, 51,
+--     dan 50 tahun sebelumnya (lihat week_spine).
+-- ============================================================================
+weekly_keyed AS (
+  SELECT
+    o.subdist_id,
+    o.kdbarang,
+    -- `week` bisa bertipe text di sumber; hanya nilai numerik yang dipakai.
+    CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END AS week_num,
+    -- ket_week dijamin berformat 'XX.YYYY' oleh filter di parsed_t_sl_subdist,
+    -- jadi posisi 4-7 selalu tahun 4 digit dan aman di-cast tanpa guard.
+    SUBSTRING(o.ket_week FROM 4 FOR 4)::int AS ket_year,
+    LEFT(o.ket_week, 2)::int                AS ket_week_num,
+    COALESCE(o.qty_bill, 0) AS qty_bill,
+    COALESCE(o.so_awal_fdos, 0) + COALESCE(o.so_awal_spk, 0) + COALESCE(o.so_awal_spo, 0) AS so_awal_all
+  FROM final_output o
+),
+weekly_ratio AS (
+  SELECT
+    k.week_num,
+    -- Tahun diambil dari ket_week, dikoreksi kalau `week` ada di sisi lain
+    -- pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record di
+    -- week 01 berarti tahun 2027, dan sebaliknya).
+    CASE
+      WHEN k.ket_week_num >= 50 AND k.week_num <= 3  THEN k.ket_year + 1
+      WHEN k.ket_week_num <= 3  AND k.week_num >= 50 THEN k.ket_year - 1
+      ELSE k.ket_year
+    END AS week_year,
+    k.subdist_id,
+    k.kdbarang,
+    CASE
+      WHEN SUM(k.so_awal_all) = 0 THEN 0
+      ELSE ROUND(
+        (SUM(k.qty_bill)::numeric / NULLIF(SUM(k.so_awal_all), 0)::numeric) * 100
+      , 1)
+    END AS pct_week
+  FROM weekly_keyed k
+  WHERE k.week_num IS NOT NULL
+  GROUP BY 1, 2, 3, 4
+),
+-- Urutan week absolut dari week yang benar-benar ada di data. Nomor urut ini
+-- yang jadi sumbu window, supaya week 01 bersebelahan dengan week 52 tahun
+-- sebelumnya, bukan melompat ke week 04 di tahun yang sama.
+week_spine AS (
+  SELECT
+    week_year,
+    week_num,
+    ROW_NUMBER() OVER (ORDER BY week_year, week_num) AS week_seq
+  FROM (SELECT DISTINCT week_year, week_num FROM weekly_ratio) d
+),
+weekly_avg_last_3 AS (
+  SELECT
+    r.week_year,
+    r.week_num,
+    r.subdist_id,
+    r.kdbarang,
+    -- SUM (bukan AVG) lalu dibagi 3: week yang tidak muncul di window tidak
+    -- menambah SUM, jadi otomatis terhitung 0% tanpa mengecilkan pembagi.
+    -- RANGE dipakai (bukan ROWS) supaya jendela dihitung dari jarak week, jadi
+    -- week yang kosong pada subdist + kdbarang ini tidak menggeser jendela ke
+    -- week yang lebih jauh.
+    ROUND(
+      COALESCE(
+        SUM(r.pct_week) OVER (
+          PARTITION BY r.subdist_id, r.kdbarang
+          ORDER BY s.week_seq
+          RANGE BETWEEN 3 PRECEDING AND 1 PRECEDING
+        ), 0
+      ) / 3
+    , 1) AS avg_last_3_week
+  FROM weekly_ratio r
+  JOIN week_spine s
+    ON s.week_year = r.week_year
+   AND s.week_num  = r.week_num
+)
+SELECT
+  o.*,
+  -- Baris dengan `week` non-numerik tidak dapat pasangan di weekly_avg_last_3;
+  -- diperlakukan sama dengan "tidak ada history" -> 0.
+  COALESCE(w.avg_last_3_week, 0) AS avg_last_3_week
+FROM final_output o
+-- Ekspresi week_num / week_year di bawah harus sama persis dengan yang dipakai
+-- di weekly_keyed + weekly_ratio; kalau salah satu diubah, ubah keduanya.
+LEFT JOIN weekly_avg_last_3 w
+  ON  w.week_num = CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END
+  AND w.week_year = CASE
+        WHEN LEFT(o.ket_week, 2)::int >= 50
+         AND CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END <= 3
+          THEN SUBSTRING(o.ket_week FROM 4 FOR 4)::int + 1
+        WHEN LEFT(o.ket_week, 2)::int <= 3
+         AND CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END >= 50
+          THEN SUBSTRING(o.ket_week FROM 4 FOR 4)::int - 1
+        ELSE SUBSTRING(o.ket_week FROM 4 FOR 4)::int
+      END
+  AND w.subdist_id IS NOT DISTINCT FROM o.subdist_id
+  AND w.kdbarang   IS NOT DISTINCT FROM o.kdbarang
