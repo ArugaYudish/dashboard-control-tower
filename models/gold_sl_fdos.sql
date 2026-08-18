@@ -19,8 +19,11 @@ parsed_t_sl_subdist AS (
     COALESCE(t.so_confirm, 0) AS so_confirm_num,
     COALESCE(t.qty_bill, 0)   AS qty_bill_num
   FROM spx.v_sl_subdist t
-  -- hanya ambil ket_week berformat 'XX.' (dua digit minggu + titik)
-  WHERE t.ket_week ~ '^[0-9]{2}\.'
+  -- Hanya ambil ket_week berformat 'XX.YYYY' (XX = minggu, YYYY = tahun),
+  -- contoh '32.2026' atau '32.2026 SPK'. Pola wajib menyertakan tahun 4 digit
+  -- supaya tanggal seperti '20.08.2026' tidak ikut lolos -- setelah '20.' isinya
+  -- '08.2', bukan 4 digit. Batas [^0-9] di akhir mencegah '32.20261' ikut cocok.
+  WHERE t.ket_week ~ '^[0-9]{2}\.[0-9]{4}([^0-9]|$)'
 ),
 calculated_t_sl_subdist AS (
   SELECT
@@ -154,7 +157,7 @@ t.result_w,
 t.result_b_dot,
 t.result_e as result_e2,
 t.calculated_so_awal,
--- ket_week sudah dijamin berformat 'XX.' oleh filter di parsed_t_sl_subdist,
+-- ket_week sudah dijamin berformat 'XX.YYYY' oleh filter di parsed_t_sl_subdist,
 -- jadi dua digit pertama selalu angka dan aman di-cast tanpa guard.
 LEFT(t.ket_week, 2) AS so_week,
 CASE
