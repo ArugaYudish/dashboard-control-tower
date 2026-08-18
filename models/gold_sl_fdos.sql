@@ -1,4 +1,9 @@
-{{ config(materialized='table') }}
+{{ config(
+    materialized='table',
+    indexes=[
+      {'columns': ['week', 'subdist_id', 'kdbarang']}
+    ]
+) }}
 
 
 WITH override_purwosari_locations (purwosari_subdist, purwosari_plant) AS (
@@ -165,6 +170,10 @@ t.calculated_so_awal,
 -- ket_week sudah dijamin berformat 'XX.YYYY' oleh filter di parsed_t_sl_subdist,
 -- jadi dua digit pertama selalu angka dan aman di-cast tanpa guard.
 LEFT(t.ket_week, 2) AS so_week,
+-- Kunci week untuk avg_last_3_week, dihitung sekali di sini supaya join di
+-- bawah bisa pakai perbandingan kolom biasa (hash join), bukan ekspresi.
+-- `week` bisa bertipe text di sumber, jadi hanya nilai numerik yang dipakai.
+CASE WHEN t.week::text ~ '^[0-9]+$' THEN t.week::text::int END AS week_num,
 CASE
   WHEN t.tgl_billing IS NULL OR t.tgl_billing IN ('', '00.00.0000') THEN 'Reason'
   ELSE mc_bill.week::text
@@ -178,8 +187,6 @@ msd.jalur, msd.region_2, msd.region_3
 FROM totals t
 LEFT JOIN spx.m_cycle3 mc_bill
   ON mc_bill.cdate::date = TO_DATE(NULLIF(t.tgl_billing, '00.00.0000'), 'DD.MM.YYYY')
-LEFT JOIN spx.m_cycle3 mc_so
-  ON mc_so.cdate::date = TO_DATE(NULLIF(t.tgl_so, '00.00.0000'), 'DD.MM.YYYY')
 LEFT JOIN spx.mapping_subdist_delivery msd on t.subdist_id = msd.distributor_id and t.plant = msd.plant_id 
 ),
 -- Kolom final_calc ditulis eksplisit (bukan fc.*) supaya `week` bisa ditaruh
@@ -222,7 +229,19 @@ END AS so_day,
 CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_fdos,
 CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spk,
 CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo, reason.group_reason,
-fc.week
+fc.week,
+fc.week_num,
+-- Tahun kalender untuk week_num. Diambil dari ket_week ('XX.YYYY' -- dijamin
+-- oleh filter di parsed_t_sl_subdist), dikoreksi kalau `week` ada di sisi lain
+-- pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record di
+-- week 01 berarti tahun 2027, dan sebaliknya).
+CASE
+  WHEN LEFT(fc.ket_week, 2)::int >= 50 AND fc.week_num <= 3
+    THEN SUBSTRING(fc.ket_week FROM 4 FOR 4)::int + 1
+  WHEN LEFT(fc.ket_week, 2)::int <= 3  AND fc.week_num >= 50
+    THEN SUBSTRING(fc.ket_week FROM 4 FOR 4)::int - 1
+  ELSE SUBSTRING(fc.ket_week FROM 4 FOR 4)::int
+END AS week_year
 FROM final_calc fc
  left join reason on fc.reason = reason.reason_id
 ),
@@ -239,41 +258,20 @@ FROM final_calc fc
 --   * Lookback mengikuti kalender lintas tahun: week 01 mengambil week 52, 51,
 --     dan 50 tahun sebelumnya (lihat week_spine).
 -- ============================================================================
-weekly_keyed AS (
-  SELECT
-    o.subdist_id,
-    o.kdbarang,
-    -- `week` bisa bertipe text di sumber; hanya nilai numerik yang dipakai.
-    CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END AS week_num,
-    -- ket_week dijamin berformat 'XX.YYYY' oleh filter di parsed_t_sl_subdist,
-    -- jadi posisi 4-7 selalu tahun 4 digit dan aman di-cast tanpa guard.
-    SUBSTRING(o.ket_week FROM 4 FOR 4)::int AS ket_year,
-    LEFT(o.ket_week, 2)::int                AS ket_week_num,
-    COALESCE(o.qty_bill, 0) AS qty_bill,
-    COALESCE(o.so_awal_fdos, 0) + COALESCE(o.so_awal_spk, 0) + COALESCE(o.so_awal_spo, 0) AS so_awal_all
-  FROM final_output o
-),
 weekly_ratio AS (
   SELECT
-    k.week_num,
-    -- Tahun diambil dari ket_week, dikoreksi kalau `week` ada di sisi lain
-    -- pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record di
-    -- week 01 berarti tahun 2027, dan sebaliknya).
+    o.week_year,
+    o.week_num,
+    o.subdist_id,
+    o.kdbarang,
     CASE
-      WHEN k.ket_week_num >= 50 AND k.week_num <= 3  THEN k.ket_year + 1
-      WHEN k.ket_week_num <= 3  AND k.week_num >= 50 THEN k.ket_year - 1
-      ELSE k.ket_year
-    END AS week_year,
-    k.subdist_id,
-    k.kdbarang,
-    CASE
-      WHEN SUM(k.so_awal_all) = 0 THEN 0
+      WHEN SUM(o.so_awal_fdos + o.so_awal_spk + o.so_awal_spo) = 0 THEN 0
       ELSE ROUND(
-        (SUM(k.qty_bill)::numeric / NULLIF(SUM(k.so_awal_all), 0)::numeric) * 100
+        (SUM(o.qty_bill)::numeric / NULLIF(SUM(o.so_awal_fdos + o.so_awal_spk + o.so_awal_spo), 0)::numeric) * 100
       , 1)
     END AS pct_week
-  FROM weekly_keyed k
-  WHERE k.week_num IS NOT NULL
+  FROM final_output o
+  WHERE o.week_num IS NOT NULL
   GROUP BY 1, 2, 3, 4
 ),
 -- Urutan week absolut dari week yang benar-benar ada di data. Nomor urut ini
@@ -313,22 +311,14 @@ weekly_avg_last_3 AS (
 )
 SELECT
   o.*,
-  -- Baris dengan `week` non-numerik tidak dapat pasangan di weekly_avg_last_3;
+  -- Baris tanpa pasangan (week non-numerik, atau subdist_id/kdbarang NULL)
   -- diperlakukan sama dengan "tidak ada history" -> 0.
   COALESCE(w.avg_last_3_week, 0) AS avg_last_3_week
 FROM final_output o
--- Ekspresi week_num / week_year di bawah harus sama persis dengan yang dipakai
--- di weekly_keyed + weekly_ratio; kalau salah satu diubah, ubah keduanya.
+-- Semua kondisi memakai perbandingan kolom = kolom (bukan ekspresi dan bukan
+-- IS NOT DISTINCT FROM) supaya planner bisa memilih hash join.
 LEFT JOIN weekly_avg_last_3 w
-  ON  w.week_num = CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END
-  AND w.week_year = CASE
-        WHEN LEFT(o.ket_week, 2)::int >= 50
-         AND CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END <= 3
-          THEN SUBSTRING(o.ket_week FROM 4 FOR 4)::int + 1
-        WHEN LEFT(o.ket_week, 2)::int <= 3
-         AND CASE WHEN o.week::text ~ '^[0-9]+$' THEN o.week::text::int END >= 50
-          THEN SUBSTRING(o.ket_week FROM 4 FOR 4)::int - 1
-        ELSE SUBSTRING(o.ket_week FROM 4 FOR 4)::int
-      END
-  AND w.subdist_id IS NOT DISTINCT FROM o.subdist_id
-  AND w.kdbarang   IS NOT DISTINCT FROM o.kdbarang
+  ON  w.week_year  = o.week_year
+  AND w.week_num   = o.week_num
+  AND w.subdist_id = o.subdist_id
+  AND w.kdbarang   = o.kdbarang
