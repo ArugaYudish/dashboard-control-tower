@@ -2,7 +2,8 @@
     materialized='table',
     indexes=[
       {'columns': ['week', 'subdist_id', 'kdbarang']}
-    ]
+    ],
+    pre_hook="SET LOCAL work_mem = '256MB'"
 ) }}
 
 
@@ -22,7 +23,10 @@ parsed_t_sl_subdist AS (
     t.*,
     COALESCE(t.so_awal, 0)    AS so_awal_num,
     COALESCE(t.so_confirm, 0) AS so_confirm_num,
-    COALESCE(t.qty_bill, 0)   AS qty_bill_num
+    COALESCE(t.qty_bill, 0)   AS qty_bill_num,
+    -- Kunci week untuk avg_last_3_week. `week` bisa bertipe text di sumber,
+    -- jadi hanya nilai numerik yang dipakai; sisanya NULL dan tidak dihitung.
+    CASE WHEN t.week::text ~ '^[0-9]+$' THEN t.week::text::int END AS week_num
   FROM spx.v_sl_subdist t
   -- Hanya ambil ket_week berformat 'XX.YYYY' (XX = minggu, YYYY = tahun),
   -- contoh '32.2026' atau '32.2026 SPK'. Pola wajib menyertakan tahun 4 digit
@@ -30,11 +34,35 @@ parsed_t_sl_subdist AS (
   -- '08.2', bukan 4 digit. Batas [^0-9] di akhir mencegah '32.20261' ikut cocok.
   WHERE t.ket_week ~ '^[0-9]{2}\.[0-9]{4}([^0-9]|$)'
 ),
-calculated_t_sl_subdist AS (
+-- NOT MATERIALIZED: CTE ini dibaca dua cabang (detail + weekly_ratio). Tanpa
+-- hint ini Postgres men-spool hasilnya ke disk dan mematikan parallel scan
+-- untuk keduanya; dengan hint, tiap cabang men-scan sumbernya sendiri (murah,
+-- karena filter ket_week sudah memangkas di level seq scan).
+calculated_t_sl_subdist AS NOT MATERIALIZED (
   SELECT
     t.*,
-    CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal
+    CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal,
+    -- Tahun kalender untuk week_num, diambil dari ket_week ('XX.YYYY' -- dijamin
+    -- oleh filter di parsed_t_sl_subdist), dikoreksi kalau `week` ada di sisi
+    -- lain pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record
+    -- di week 01 berarti tahun 2027, dan sebaliknya).
+    CASE
+      WHEN LEFT(t.ket_week, 2)::int >= 50 AND t.week_num <= 3
+        THEN SUBSTRING(t.ket_week FROM 4 FOR 4)::int + 1
+      WHEN LEFT(t.ket_week, 2)::int <= 3  AND t.week_num >= 50
+        THEN SUBSTRING(t.ket_week FROM 4 FOR 4)::int - 1
+      ELSE SUBSTRING(t.ket_week FROM 4 FOR 4)::int
+    END AS week_year
   FROM parsed_t_sl_subdist t
+),
+-- m_cycle3 dipakai per tanggal billing. Di-dedupe per tanggal supaya (a) tidak
+-- ada risiko baris fakta terduplikasi kalau satu cdate punya >1 row, dan (b)
+-- planner tahu kuncinya unik -- tanpa ini estimasi join meledak jadi 50 juta
+-- baris dan Postgres memilih merge join yang men-sort 565MB ke disk.
+cycle_by_date AS (
+  SELECT cdate::date AS cdate_d, MIN(week) AS week
+  FROM spx.m_cycle3
+  GROUP BY 1
 ),
 reason as (
 select reason_id, reason_nm, group_reason 
@@ -50,7 +78,8 @@ results AS (
     ma.acc_name AS sls_div,
     mmsr.region_id || ma.acc_name AS key1, vsh.grsm_name AS sales_group,
     ttss.plant, ttss.distributor_id AS subdist_id, mdist.distributor_nm, ttss.tgl_so,
-    ttss.po_no AS so_no, ttss.ket_week, ttss.week, ttss.sku AS kdbarang, mp.pcodename AS nmbarang,
+    ttss.po_no AS so_no, ttss.ket_week, ttss.week, ttss.week_num, ttss.week_year,
+    ttss.sku AS kdbarang, mp.pcodename AS nmbarang,
     mp.subbrand_id, msb.subbrand_nm,
     ttss.so_awal_num AS so_awal, ttss.so_confirm_num AS so_confirm, ttss.tgl_billing, ttss.bill_no,
     ttss.qty_bill_num AS qty_bill, ttss.reason,
@@ -138,7 +167,8 @@ totals AS (
 final_calc AS (
 SELECT
   t.warehouse_name, t.region_code, t.region_nm, t.division, t.group_division, t.sls_div, t.key1, t.sales_group, t.plant, 
-  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.kdbarang, t.nmbarang,
+  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.week_num, t.week_year,
+  t.kdbarang, t.nmbarang,
   t.subbrand_id, t.subbrand_nm, t.so_awal, t.so_confirm,
   t.tgl_billing, t.bill_no, t.qty_bill, t.reason, t.status_reason, t.result_o, t.result_m, 
   t.result_b, t.result_z, t.result_d, t.result_t, t.result_y, t.result_a, t.result_p, t.result_c, 
@@ -170,10 +200,6 @@ t.calculated_so_awal,
 -- ket_week sudah dijamin berformat 'XX.YYYY' oleh filter di parsed_t_sl_subdist,
 -- jadi dua digit pertama selalu angka dan aman di-cast tanpa guard.
 LEFT(t.ket_week, 2) AS so_week,
--- Kunci week untuk avg_last_3_week, dihitung sekali di sini supaya join di
--- bawah bisa pakai perbandingan kolom biasa (hash join), bukan ekspresi.
--- `week` bisa bertipe text di sumber, jadi hanya nilai numerik yang dipakai.
-CASE WHEN t.week::text ~ '^[0-9]+$' THEN t.week::text::int END AS week_num,
 CASE
   WHEN t.tgl_billing IS NULL OR t.tgl_billing IN ('', '00.00.0000') THEN 'Reason'
   ELSE mc_bill.week::text
@@ -185,8 +211,8 @@ CASE
 END AS realisasi,
 msd.jalur, msd.region_2, msd.region_3
 FROM totals t
-LEFT JOIN spx.m_cycle3 mc_bill
-  ON mc_bill.cdate::date = TO_DATE(NULLIF(t.tgl_billing, '00.00.0000'), 'DD.MM.YYYY')
+LEFT JOIN cycle_by_date mc_bill
+  ON mc_bill.cdate_d = TO_DATE(NULLIF(t.tgl_billing, '00.00.0000'), 'DD.MM.YYYY')
 LEFT JOIN spx.mapping_subdist_delivery msd on t.subdist_id = msd.distributor_id and t.plant = msd.plant_id 
 ),
 -- Kolom final_calc ditulis eksplisit (bukan fc.*) supaya `week` bisa ditaruh
@@ -229,19 +255,7 @@ END AS so_day,
 CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_fdos,
 CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spk,
 CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo, reason.group_reason,
-fc.week,
-fc.week_num,
--- Tahun kalender untuk week_num. Diambil dari ket_week ('XX.YYYY' -- dijamin
--- oleh filter di parsed_t_sl_subdist), dikoreksi kalau `week` ada di sisi lain
--- pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record di
--- week 01 berarti tahun 2027, dan sebaliknya).
-CASE
-  WHEN LEFT(fc.ket_week, 2)::int >= 50 AND fc.week_num <= 3
-    THEN SUBSTRING(fc.ket_week FROM 4 FOR 4)::int + 1
-  WHEN LEFT(fc.ket_week, 2)::int <= 3  AND fc.week_num >= 50
-    THEN SUBSTRING(fc.ket_week FROM 4 FOR 4)::int - 1
-  ELSE SUBSTRING(fc.ket_week FROM 4 FOR 4)::int
-END AS week_year
+fc.week, fc.week_num, fc.week_year
 FROM final_calc fc
  left join reason on fc.reason = reason.reason_id
 ),
@@ -258,20 +272,36 @@ FROM final_calc fc
 --   * Lookback mengikuti kalender lintas tahun: week 01 mengambil week 52, 51,
 --     dan 50 tahun sebelumnya (lihat week_spine).
 -- ============================================================================
+-- Agregat mingguan dibaca langsung dari calculated_t_sl_subdist, BUKAN dari
+-- final_output. final_output lebarnya ~1,7 KB per baris; kalau CTE itu dibaca
+-- dua kali, Postgres men-spool ~3,4 GB ke disk dan CTE scan-nya sendiri makan
+-- puluhan detik. Cabang ini hanya butuh 6 kolom.
+--
+-- Penyebutnya memakai calculated_so_awal karena so_awal_fdos + so_awal_spk +
+-- so_awal_spo SELALU sama dengan calculated_so_awal: ketiganya berasal dari
+-- calculated_keterangan yang nilainya pasti salah satu dari FDOS/SPK/SPO, dan
+-- yang tidak terpilih bernilai 0.
+--
+-- JOIN m_product/m_acc_div/m_acc + filter acc_id diulang di sini supaya
+-- himpunan barisnya sama persis dengan yang masuk ke final_output.
 weekly_ratio AS (
   SELECT
-    o.week_year,
-    o.week_num,
-    o.subdist_id,
-    o.kdbarang,
+    ttss.week_year,
+    ttss.week_num,
+    ttss.distributor_id AS subdist_id,
+    ttss.sku            AS kdbarang,
     CASE
-      WHEN SUM(o.so_awal_fdos + o.so_awal_spk + o.so_awal_spo) = 0 THEN 0
+      WHEN SUM(ttss.calculated_so_awal) = 0 THEN 0
       ELSE ROUND(
-        (SUM(o.qty_bill)::numeric / NULLIF(SUM(o.so_awal_fdos + o.so_awal_spk + o.so_awal_spo), 0)::numeric) * 100
+        (SUM(ttss.qty_bill_num)::numeric / NULLIF(SUM(ttss.calculated_so_awal), 0)::numeric) * 100
       , 1)
     END AS pct_week
-  FROM final_output o
-  WHERE o.week_num IS NOT NULL
+  FROM calculated_t_sl_subdist ttss
+  JOIN spx.m_product mp  ON ttss.sku = mp.pcode
+  JOIN spx.m_acc_div mad ON mp.div_id = mad.div_id
+  JOIN spx.m_acc ma      ON mad.acc_id = ma.acc_id
+  WHERE ttss.week_num IS NOT NULL
+    AND ma.acc_id NOT IN ('AC0000', 'MT')
   GROUP BY 1, 2, 3, 4
 ),
 -- Urutan week absolut dari week yang benar-benar ada di data. Nomor urut ini
@@ -313,7 +343,9 @@ SELECT
   o.*,
   -- Baris tanpa pasangan (week non-numerik, atau subdist_id/kdbarang NULL)
   -- diperlakukan sama dengan "tidak ada history" -> 0.
-  COALESCE(w.avg_last_3_week, 0) AS avg_last_3_week
+  COALESCE(w.avg_last_3_week, 0) AS avg_last_3_week,
+  d.sls_div as channel, v.ss_id, v.rsm_id, v.grsm_id, v.nsm_id,
+  p.div_id as sbu_id, p.brand_id, p.parent_id
 FROM final_output o
 -- Semua kondisi memakai perbandingan kolom = kolom (bukan ekspresi dan bukan
 -- IS NOT DISTINCT FROM) supaya planner bisa memilih hash join.
@@ -322,3 +354,6 @@ LEFT JOIN weekly_avg_last_3 w
   AND w.week_num   = o.week_num
   AND w.subdist_id = o.subdist_id
   AND w.kdbarang   = o.kdbarang
+left join spx.m_product p on o.kdbarang = p.pcode
+	left join spx.m_distributor d on o.subdist_id = d.distributor_id
+	left join spx.v_sales_hierarchy_product v on o.subdist_id = v.distributor_id and o.kdbarang = v.pcode
