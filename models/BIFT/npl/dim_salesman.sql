@@ -13,89 +13,46 @@
 WITH combined_salesman AS (
     SELECT 
         'm1' AS source_schema,
-        distributor_id,
-        sls_id,
-        sls_nm,
-        team_id,
-        opr_type,
-        salesforce_id,
-        upd_date,
-        trans_date, 
-        _airbyte_extracted_at
+        *
     FROM raw_ficom_m1.m_salesman
 
     UNION ALL
 
     SELECT 
         'm2' AS source_schema,
-        distributor_id,
-        sls_id,
-        sls_nm,
-        team_id,
-        opr_type,
-        salesforce_id,
-        upd_date,
-        trans_date,
-        _airbyte_extracted_at
+        *
     FROM raw_ficom_m2.m_salesman
 
     UNION ALL
 
     SELECT 
         'm3' AS source_schema,
-        distributor_id,
-        sls_id,
-        sls_nm,
-        team_id,
-        opr_type,
-        salesforce_id,
-        upd_date,
-        trans_date,
-        _airbyte_extracted_at
+        *
     FROM raw_ficom_m3.m_salesman
 ),
 
 -- Deduplicate salesforce mapping by salesforce_id
 combined_salesforce_mapping AS (
     SELECT DISTINCT ON (salesforce_id)
-	* FROM (SELECT DISTINCT ON (salesforce_id)
-	    div_id,
-	    div_nm,
-	    salesforce_id,
-	    salesforce_nm,
-	    gsalesforce_id,
-	    gsalesforce_nm
-	FROM raw_ficom_m1.m_mapping_group_salesforce
-	UNION ALL
-	SELECT DISTINCT ON (salesforce_id)
-	    div_id,
-	    div_nm,
-	    salesforce_id,
-	    salesforce_nm,
-	    gsalesforce_id,
-	    gsalesforce_nm
-	FROM raw_ficom_m2.m_mapping_group_salesforce
-	UNION ALL
-	SELECT DISTINCT ON (salesforce_id)
-	    div_id,
-	    div_nm,
-	    salesforce_id,
-	    salesforce_nm,
-	    gsalesforce_id,
-	    gsalesforce_nm
-	FROM raw_ficom_m3.m_mapping_group_salesforce) AS salesforce),
+        *
+    FROM (
+        SELECT DISTINCT ON (salesforce_id)
+            *
+        FROM raw_ficom_m1.m_mapping_group_salesforce
+        UNION ALL
+        SELECT DISTINCT ON (salesforce_id)
+            *
+        FROM raw_ficom_m2.m_mapping_group_salesforce
+        UNION ALL
+        SELECT DISTINCT ON (salesforce_id)
+            *
+        FROM raw_ficom_m3.m_mapping_group_salesforce
+    ) AS salesforce
+),
 
 dedup_salesman AS (
     SELECT DISTINCT ON (distributor_id, sls_id)
-        source_schema,
-        distributor_id,
-        sls_id,
-        sls_nm,
-        team_id,
-        opr_type,
-        salesforce_id,
-        upd_date,
-        trans_date
+        *
     FROM combined_salesman
     WHERE distributor_id IS NOT NULL AND sls_id IS NOT NULL
     ORDER BY 
