@@ -160,12 +160,14 @@ CASE
   WHEN t.tgl_billing IS NULL OR t.tgl_billing IN ('', '00.00.0000') THEN 'Reason'
   WHEN mc_bill.week - LEFT(t.ket_week, 2)::numeric < 1 THEN 'On Time'
   ELSE 'Not On Time'
-END AS realisasi
+END AS realisasi,
+msd.jalur, msd.region_2, msd.region_3
 FROM totals t
 LEFT JOIN spx.m_cycle3 mc_bill
   ON mc_bill.cdate::date = TO_DATE(NULLIF(t.tgl_billing, '00.00.0000'), 'DD.MM.YYYY')
 LEFT JOIN spx.m_cycle3 mc_so
   ON mc_so.cdate::date = TO_DATE(NULLIF(t.tgl_so, '00.00.0000'), 'DD.MM.YYYY')
+LEFT JOIN spx.mapping_subdist_delivery msd on t.subdist_id = msd.distributor_id and t.plant = msd.plant_id 
 )
 SELECT
   fc.*,
