@@ -71,7 +71,7 @@ where type_id ='8'
 ),
 results AS (
   SELECT
-    COALESCE(opl.purwosari_plant, mw.wh_nm) AS warehouse_name,
+    mw.wh_nm AS warehouse_name,
     mdist.region_id AS region_code, mmsr.region_nm AS region_nm,
     mp.div_id || ' ' || md.div_nm AS division,
     COALESCE(mgd.division_name, 'HOMECARE') AS group_division,
@@ -147,7 +147,6 @@ results AS (
   -- PK m_subbrand = (brand_id, subbrand_id), jadi subbrand_id saja tidak unik --
   -- join wajib pakai dua kolom supaya tidak ketarik subbrand milik brand lain.
   LEFT JOIN spx.m_subbrand msb ON mp.brand_id = msb.brand_id AND mp.subbrand_id = msb.subbrand_id
-  LEFT JOIN override_purwosari_locations opl ON ttss.distributor_id = opl.purwosari_subdist
   LEFT JOIN spx.m_warehouse mw ON ttss.plant = mw.wh_id
   LEFT JOIN spx.m_division md ON mp.div_id = md.div_id
   LEFT JOIN spx.m_group_division mgd ON mgd.division_id = mp.div_id
