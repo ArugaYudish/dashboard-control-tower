@@ -46,6 +46,7 @@ results AS (
     mmsr.region_id || ma.acc_name AS key1, vsh.grsm_name AS sales_group,
     ttss.plant, ttss.distributor_id AS subdist_id, mdist.distributor_nm, ttss.tgl_so,
     ttss.po_no AS so_no, ttss.ket_week, ttss.week, ttss.sku AS kdbarang, mp.pcodename AS nmbarang,
+    mp.subbrand_id, msb.subbrand_nm,
     ttss.so_awal_num AS so_awal, ttss.so_confirm_num AS so_confirm, ttss.tgl_billing, ttss.bill_no,
     ttss.qty_bill_num AS qty_bill, ttss.reason,
     ttss.calculated_so_awal,
@@ -109,6 +110,9 @@ results AS (
   JOIN spx.m_product mp ON ttss.sku = mp.pcode
   JOIN spx.m_acc_div mad ON mp.div_id = mad.div_id
   JOIN spx.m_acc ma ON mad.acc_id = ma.acc_id
+  -- PK m_subbrand = (brand_id, subbrand_id), jadi subbrand_id saja tidak unik --
+  -- join wajib pakai dua kolom supaya tidak ketarik subbrand milik brand lain.
+  LEFT JOIN spx.m_subbrand msb ON mp.brand_id = msb.brand_id AND mp.subbrand_id = msb.subbrand_id
   LEFT JOIN override_purwosari_locations opl ON ttss.distributor_id = opl.purwosari_subdist
   LEFT JOIN spx.m_warehouse mw ON ttss.plant = mw.wh_id
   LEFT JOIN spx.m_division md ON mp.div_id = md.div_id
@@ -129,7 +133,8 @@ totals AS (
 final_calc AS (
 SELECT
   t.warehouse_name, t.region_code, t.region_nm, t.division, t.group_division, t.sls_div, t.key1, t.sales_group, t.plant, 
-  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.kdbarang, t.nmbarang, t.so_awal, t.so_confirm,
+  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.kdbarang, t.nmbarang,
+  t.subbrand_id, t.subbrand_nm, t.so_awal, t.so_confirm,
   t.tgl_billing, t.bill_no, t.qty_bill, t.reason, t.status_reason, t.result_o, t.result_m, 
   t.result_b, t.result_z, t.result_d, t.result_t, t.result_y, t.result_a, t.result_p, t.result_c, 
   t.result_f, t.result_g, t.result_k, t.result_s, t.result_x, t.result_ppn, t.result_e, t.sum_z_ao,
@@ -182,7 +187,8 @@ LEFT JOIN spx.mapping_subdist_delivery msd on t.subdist_id = msd.distributor_id 
 SELECT
   fc.warehouse_name, fc.region_code, fc.region_nm, fc.division, fc.group_division, fc.sls_div, fc.key1,
   fc.sales_group, fc.plant, fc.subdist_id, fc.distributor_nm, fc.tgl_so, fc.so_no, fc.ket_week,
-  fc.kdbarang, fc.nmbarang, fc.so_awal, fc.so_confirm, fc.tgl_billing, fc.bill_no, fc.qty_bill,
+  fc.kdbarang, fc.nmbarang, fc.subbrand_id, fc.subbrand_nm, fc.so_awal, fc.so_confirm,
+  fc.tgl_billing, fc.bill_no, fc.qty_bill,
   fc.reason, fc.status_reason, fc.result_o, fc.result_m, fc.result_b, fc.result_z, fc.result_d,
   fc.result_t, fc.result_y, fc.result_a, fc.result_p, fc.result_c, fc.result_f, fc.result_g,
   fc.result_k, fc.result_s, fc.result_x, fc.result_ppn, fc.result_e, fc.sum_z_ao, fc.late_bill,
