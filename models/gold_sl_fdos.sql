@@ -28,6 +28,11 @@ calculated_t_sl_subdist AS (
     CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal
   FROM parsed_t_sl_subdist t
 ),
+reason as (
+select reason_id, reason_nm, group_reason 
+ from spx.m_reason
+where type_id ='8'
+),
 results AS (
   SELECT
     COALESCE(opl.purwosari_plant, mw.wh_nm) AS warehouse_name,
@@ -196,5 +201,6 @@ CASE
 END AS so_day,
 CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_fdos,
 CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spk,
-CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo
+CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo, reason.group_reason
 FROM final_calc fc
+ left join reason on fc.reason = reason.reason_id
