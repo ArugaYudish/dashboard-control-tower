@@ -86,7 +86,7 @@ cte_nmrc_tgt_call AS (
         MAX(tcall_glb::numeric) AS tcall_glb,
         MAX(rcall_kpl::numeric) AS rcall_kpl,
         MAX(ec_kpl::numeric) AS ec_kpl
-    FROM raw_ficom_m3.m_nmrc_subdetail
+    FROM bift.bronze_nmrc_subdetail
     WHERE tgl >= '2026-01-01'
     GROUP BY 
         distributor_id::varchar,

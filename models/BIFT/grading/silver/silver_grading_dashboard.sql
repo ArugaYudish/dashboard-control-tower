@@ -25,7 +25,7 @@ WITH latest_fcustsls AS (
             PARTITION BY distributor_id::varchar, cust_id::varchar 
             ORDER BY tahun DESC, periode DESC
         ) AS rn
-    FROM raw_ficom_m3.v_fcustsls_staging
+    FROM bift.bronze_fcustsls_staging
 ),
 
 -- 1. ANCHOR HIERARKI SALESMAN M3
@@ -39,8 +39,8 @@ cte_m3_hierarchy AS (
         h.grsm_id, h.grsm_nm,
         h.rsm_id, h.rsm_nm,
         h.ss_id, h.ss_nm
-    FROM raw_ficom_m3.v_salesman_hierarchy h
-    LEFT JOIN raw_ficom_m3.m_salesman ms
+    FROM bift.bronze_salesman_hierarchy h
+    LEFT JOIN bift.dim_salesman ms
         ON h.sls_id::varchar = ms.sls_id::varchar
        AND h.distributor_id::varchar = ms.distributor_id::varchar
 ),
@@ -58,11 +58,11 @@ cte_grading_store AS (
         MAX(COALESCE(b.visit_date, g.visit_date)) AS max_visit_date,
         MAX(COALESCE(b.team_id::varchar, g.team_id::varchar)) AS team_id,
         MAX(COALESCE(b.grade, g.grade)) AS final_grade
-    FROM raw_ficom_m3.t_grading_ir g
+    FROM bift.bronze_grading_ir g
     INNER JOIN cte_m3_hierarchy h 
         ON g.sls_id::varchar = h.sls_id 
        AND g.distributor_id::varchar = h.distributor_id
-    LEFT JOIN raw_ficom_m3.t_grading_banding b
+    LEFT JOIN bift.bronze_grading_banding b
         ON g.distributor_id::varchar = b.distributor_id::varchar
        AND g.outlet_id::varchar      = b.outlet_id::varchar
        AND g.sls_id::varchar         = b.sls_id::varchar
@@ -92,7 +92,7 @@ cte_manual_dedup AS (
         distributor_id::varchar AS distributor_id, outlet_id::varchar AS outlet_id,
         sls_id::varchar AS sls_id, kode_ap::varchar AS kode_ap, pcode::varchar AS pcode, visit_date,
         MAX(count_facing::integer) AS count_facing
-    FROM raw_ficom_m3.t_rcall_avis_manual
+    FROM bift.bronze_rcall_avis_manual
     WHERE visit_date >= '2025-01-01'
     GROUP BY 1, 2, 3, 4, 5, 6
 ),
@@ -102,7 +102,7 @@ cte_avis_raw_joined AS (
         a.distributor_id::varchar AS distributor_id, a.outlet_id::varchar AS outlet_id,
         a.sls_id::varchar AS sls_id, a.kode_ap::varchar AS kode_ap, a.pcode::varchar AS pcode, a.visit_date AS visit_date,
         COALESCE(m.count_facing, a.count_facing::integer, 0) AS count_facing
-    FROM raw_ficom_m3.t_rcall_avis_d a
+    FROM bift.bronze_rcall_avis_d a
     INNER JOIN cte_m3_hierarchy h 
         ON a.sls_id::varchar = h.sls_id AND a.distributor_id::varchar = h.distributor_id
     LEFT JOIN cte_manual_dedup m 
@@ -269,15 +269,15 @@ LEFT JOIN cte_grading_store_fallback gst_fb
    AND act.year = gst_fb.year AND act.week = gst_fb.week
 
 -- MASTER PRODUCT & SUBBRAND MAPPING
-LEFT JOIN raw_ficom_m3.m_product mp 
+LEFT JOIN bift.dim_product mp 
     ON act.pcode = mp.pcode::varchar
 
-LEFT JOIN raw_ficom_m3.m_mapping_subbrand mms 
+LEFT JOIN bift.dim_mapping_subbrand mms 
     ON (mp.prlin::varchar || mp.brand::varchar || mp.sbra1::varchar) = mms.subbrand_id::varchar
 
 -- MASTER DISTRIBUTOR & CUSTOMER
-LEFT JOIN raw_ficom_m3.m_distributor md ON act.distributor_id = md.distributor_id::varchar
-LEFT JOIN raw_ficom_m3.m_customer mc ON act.distributor_id = mc.distributor_id::varchar AND act.outlet_id = mc.cust_id::varchar
+LEFT JOIN bift.dim_distributor md ON act.distributor_id = md.distributor_id::varchar
+LEFT JOIN bift.dim_customer mc ON act.distributor_id = mc.distributor_id::varchar AND act.outlet_id = mc.cust_id::varchar
 
 -- STAGING OUTLET
 LEFT JOIN latest_fcustsls vfs 
@@ -286,11 +286,11 @@ LEFT JOIN latest_fcustsls vfs
    AND vfs.rn = 1
 
 -- MASTER SALESFORCE
-LEFT JOIN raw_ficom_m3.m_salesforce ms 
+LEFT JOIN bift.dim_salesforce ms 
     ON COALESCE(act.salesforce_id_sales, vfs.salesforce_id) = ms.salesforce_id::varchar
 
-LEFT JOIN raw_ficom_m3.m_mapping_group_salesforce mgc 
+LEFT JOIN bift.dim_mapping_group_salesforce mgc 
     ON COALESCE(act.salesforce_id_sales, vfs.salesforce_id) = mgc.salesforce_id::varchar
 
-LEFT JOIN raw_ficom_m3.m_group_channels mcs 
+LEFT JOIN bift.dim_group_channel mcs 
     ON vfs.channel_id = mcs.channel_id::varchar
