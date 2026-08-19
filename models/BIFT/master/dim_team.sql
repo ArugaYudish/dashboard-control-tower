@@ -15,7 +15,8 @@ with raw_combined as (
 ranked_records as (
 
     select
-        *,
+        team_id,
+        team_nm,
         row_number() over (
             partition by team_id
             order by 
@@ -25,6 +26,8 @@ ranked_records as (
 
 )
 
-select * exclude (rn)
+select
+    team_id,
+    team_nm
 from ranked_records
 where rn = 1

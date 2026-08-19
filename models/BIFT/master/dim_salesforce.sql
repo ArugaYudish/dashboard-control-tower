@@ -2,44 +2,32 @@
     materialized='table'
 ) }}
 
-with source_m1 as (
+with raw_combined as (
 
-    select
-        'm1' as source_schema,
-        salesforce_id,
-        salesforce_nm
-    from raw_ficom_m1.m_salesforce
-
-),
-
-source_m2 as (
-
-    select
-        'm2' as source_schema,
-        salesforce_id,
-        salesforce_nm
-    from raw_ficom_m2.m_salesforce
-
-),
-
-source_m3 as (
-
-    select
-        'm3' as source_schema,
-        salesforce_id,
-        salesforce_nm
-    from raw_ficom_m3.m_salesforce
-
-),
-
-unioned as (
-
-    select * from source_m1
+    select * from raw_ficom_m1.m_salesforce
     union all
-    select * from source_m2
+    select * from raw_ficom_m2.m_salesforce
     union all
-    select * from source_m3
+    select * from raw_ficom_m3.m_salesforce
+
+),
+
+ranked_records as (
+
+    select
+        salesforce_id,
+        salesforce_nm,
+        row_number() over (
+            partition by salesforce_id
+            order by 
+                case when nullif(trim(salesforce_nm), '') is not null then 1 else 2 end
+        ) as rn
+    from raw_combined
 
 )
 
-select * from unioned
+select
+    salesforce_id,
+    salesforce_nm
+from ranked_records
+where rn = 1
