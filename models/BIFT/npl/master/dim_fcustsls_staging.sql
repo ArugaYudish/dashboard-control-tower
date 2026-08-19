@@ -91,3 +91,5 @@ LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
 LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
+WHERE dfs.channel_id != '999'
+
