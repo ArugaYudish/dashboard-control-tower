@@ -2,7 +2,7 @@
     config(
         schema='bift',
         materialized='table',
-        alias='dim_fcustsls_staging',
+        alias='bronze_fcustsls_staging',
         indexes=[
           {'columns': ['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'], 'type': 'btree'},
           {'columns': ['distributor_id', 'sls_id'], 'type': 'btree'},
@@ -84,7 +84,7 @@ SELECT
     cwl.kelurahan_name,
     cwl.latitude,
     cwl.longitude
-FROM {{ ref('stg_fcustsls') }} dfs
+FROM {{ ref('dim_fcustsls') }} dfs
 LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND dfs.source_schema = mmgs.source_schema
@@ -92,4 +92,3 @@ LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
 WHERE dfs.channel_id != '999'
-
