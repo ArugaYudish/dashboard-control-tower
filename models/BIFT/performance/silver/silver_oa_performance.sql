@@ -97,7 +97,7 @@ cb_cover AS (
             SELECT *
             FROM bift.bronze_fcustsls_staging
             WHERE tahun = {{ var('tahun', 2026) }}
-                AND periode > 5
+                AND periode >= 4
         ) cs
         INNER JOIN (
             SELECT *

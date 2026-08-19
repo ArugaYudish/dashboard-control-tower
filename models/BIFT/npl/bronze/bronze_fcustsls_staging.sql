@@ -6,55 +6,6 @@
         unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode', 'source_schema'],
         incremental_strategy='delete_insert',
         pre_hook="""
-            CREATE TABLE IF NOT EXISTS bift.bronze_fcustsls_staging (
-                source_schema text,
-                _airbyte_extracted_at timestamptz,
-                distributor_id text,
-                sls_id text,
-                cust_id text,
-                tahun numeric,
-                periode numeric,
-                channel_id text,
-                channel_nm text,
-                group_channel_id text,
-                group_channel_nm text,
-                flag_aktif text,
-                group_outlet text,
-                salesforce_id text,
-                gsalesforce1_id text,
-                gsalesforce1_nm text,
-                gsalesforce2_id text,
-                gsalesforce2_nm text,
-                salesforce_nm text,
-                team_id text,
-                hrabu text,
-                nobrs text,
-                route text,
-                hjumat text,
-                hkamis text,
-                hsabtu text,
-                hsenin text,
-                slimit text,
-                visit1 text,
-                visit2 text,
-                visit3 text,
-                visit4 text,
-                cycle_kunjungan text,
-                hminggu text,
-                hselasa text,
-                cust_nm text,
-                provinsi_code text,
-                provinsi_name text,
-                kabupaten_code text,
-                kabupaten_name text,
-                kecamatan_code text,
-                kecamatan_name text,
-                kelurahan_code text,
-                kelurahan_name text,
-                latitude text,
-                longitude text
-            ) PARTITION BY LIST (periode);
-
             DO $$
             DECLARE
                 p INT;
@@ -62,9 +13,8 @@
                 FOR p IN 1..12 LOOP
                     EXECUTE format('CREATE TABLE IF NOT EXISTS bift.bronze_fcustsls_staging_p%s PARTITION OF bift.bronze_fcustsls_staging FOR VALUES IN (%s);', p, p);
                 END LOOP;
+                EXECUTE 'CREATE TABLE IF NOT EXISTS bift.bronze_fcustsls_staging_default PARTITION OF bift.bronze_fcustsls_staging DEFAULT;';
             END $$;
-
-            CREATE TABLE IF NOT EXISTS bift.bronze_fcustsls_staging_default PARTITION OF bift.bronze_fcustsls_staging DEFAULT;
         """,
         indexes=[
           {'columns': ['periode', 'tahun', 'distributor_id'], 'type': 'btree'},
