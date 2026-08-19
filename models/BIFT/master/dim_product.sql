@@ -1,36 +1,31 @@
-{{
-    config(
-        schema='bift',
-        materialized='table',
-        alias='dim_product',
-        indexes=[
-          {'columns': ['pcode'], 'type': 'btree'}
-        ]
-    )
-}}
+{{ config(
+    materialized='table'
+) }}
 
-SELECT
-    dp.pcode,
-    dp.pcode_nm,
-    dp.div_id,
-    dp.div_nm,
-    dp.team_id,
-    dp.team_nm,
-    dp.class_team_id,
-    dp.class_team_nm,
-    dp.subbrand_id,
-    dp.subbrand_nm,
-    dp.gdiv_id,
-    dp.gdiv_nm,
-    dp.cat_id,
-    dp.cat_nm,
-    dp.sbu_id,
-    dp.sbu_nm,
-    dpp.convunit2,
-    dpp.convunit3,
-    dpp.unit1, 
-    dpp.unit2,
-    dpp.unit3 
-FROM raw_olap_m3.dim_product dp
-LEFT JOIN raw_olap_m3.dim_product_pack dpp 
-       ON dp.pcode = dpp.pcode
+with raw_combined as (
+
+    select * from raw_ficom_m1.m_product
+    union all
+    select * from raw_ficom_m2.m_product
+    union all
+    select * from raw_ficom_m3.m_product
+
+),
+
+ranked_records as (
+
+    select
+        *,
+        row_number() over (
+            partition by pcode
+            order by 
+                case when nullif(trim(pcode_nm), '') is not null then 1 else 2 end,
+                case when coalesce(sell_price1, 0) > 0 then 1 else 2 end
+        ) as rn
+    from raw_combined
+
+)
+
+select * exclude (rn)
+from ranked_records
+where rn = 1
