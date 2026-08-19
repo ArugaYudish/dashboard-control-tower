@@ -2,7 +2,7 @@
     config(
         schema='bift',
         materialized='table',
-        alias='dim_salesman_hierarchy',
+        alias='bronze_salesman_hierarchy',
         indexes=[
           {
             'columns': ['distributor_id', 'sls_id'],
@@ -44,9 +44,10 @@ combined_hierarchy AS (
     JOIN raw_ficom_m1.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN raw_ficom_m1.m_salesman_spv c
+    JOIN bift.dim_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+     AND c.source_schema = 'm1'
     JOIN raw_ficom_m1.m_distributor d
       ON c.distributor_id = d.distributor_id
      AND COALESCE(d.flag_nonsis, 'N') != 'Y'
@@ -92,9 +93,10 @@ combined_hierarchy AS (
     JOIN raw_ficom_m2.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN raw_ficom_m2.m_salesman_spv c
+    JOIN bift.dim_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+     AND c.source_schema = 'm2'
     JOIN raw_ficom_m2.m_distributor d
       ON c.distributor_id = d.distributor_id
      AND COALESCE(d.flag_nonsis, 'N') != 'Y'
@@ -140,9 +142,10 @@ combined_hierarchy AS (
     JOIN raw_ficom_m3.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN raw_ficom_m3.m_salesman_spv c
+    JOIN bift.dim_salesman_spv c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
+     AND c.source_schema = 'm3'
     JOIN raw_ficom_m3.m_distributor d
       ON c.distributor_id = d.distributor_id
      AND COALESCE(d.flag_nonsis, 'N') != 'Y'
@@ -279,5 +282,3 @@ WHERE sm.sls_id IS NOT NULL
           sm.sls_nm ILIKE '% MTI %'
       )
   )
-
-

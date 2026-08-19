@@ -25,13 +25,13 @@
 --   Stream B (trx_rows)           — 1 row per invoice LINE per DAY.
 --                                    week from vd.week_no, periode from vd.prd_no.
 --
--- Joins    : CB Cover (bronze_fcustsls_staging INNER JOIN dim_salesman_hierarchy)
+-- Joins    : CB Cover (bronze_fcustsls_staging INNER JOIN bronze_salesman_hierarchy)
 --            LEFT JOIN vfsales_det (sts='905') — prd_no/week_no used directly
 --            LEFT JOIN dim_product (product hierarchy + carton conversion)
 --
 -- Filters  : tahun = var('tahun', 2026)   [CB Cover + trx]
 --            periode = 5                  [CB Cover + trx]
---            sd_id = 'WF0218'             [dim_salesman_hierarchy]
+--            sd_id = 'WF0218'             [bronze_salesman_hierarchy]
 -- =============================================================================
 WITH -- ---------------------------------------------------------------------------
 -- STEP 1 : CB Cover — covered outlets for a given tahun, all gdiv/schemas.
@@ -66,7 +66,7 @@ cb_cover AS (
         cs.kelurahan_name,
         cs.latitude,
         cs.longitude,
-        -- Sales Hierarchy (from dim_salesman_hierarchy)
+        -- Sales Hierarchy (from bronze_salesman_hierarchy)
         sh.gdiv_id,
         sh.gdiv_nm,
         sh.sd_id,
@@ -101,7 +101,7 @@ cb_cover AS (
         ) cs
         INNER JOIN (
             SELECT *
-            FROM bift.dim_salesman_hierarchy
+            FROM bift.bronze_salesman_hierarchy
             WHERE sd_id = 'WF0218'
         ) sh ON cs.distributor_id = sh.distributor_id
         AND cs.sls_id = sh.sls_id
