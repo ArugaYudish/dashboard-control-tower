@@ -1,23 +1,19 @@
-{ { config(
-    schema = 'bift',
-    materialized = 'table',
-    alias = 'silver_oa_performance',
-    indexes = [
-          {'columns': ['tahun', 'periode', 'distributor_id'],
-    'type': 'btree' },
-    { 'columns': ['tahun', 'periode', 'sls_id'],
-    'type': 'btree' },
-    { 'columns': ['tahun', 'periode', 'cust_id'],
-    'type': 'btree' },
-    { 'columns': ['tahun', 'periode', 'pcode'],
-    'type': 'btree' },
-    { 'columns': ['distributor_id', 'sls_id', 'cust_id'],
-    'type': 'btree' },
-    { 'columns': ['gdiv_id', 'source_schema'],
-    'type': 'btree' },
-    { 'columns': ['is_transaction'],
-    'type': 'btree' } ]
-) } } -- =============================================================================
+{{
+    config(
+        schema='bift',
+        materialized='table',
+        alias='silver_oa_performance',
+        indexes=[
+          {'columns': ['tahun', 'periode', 'distributor_id'],         'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'sls_id'],                 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'cust_id'],                'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'pcode'],                  'type': 'btree'},
+          {'columns': ['distributor_id', 'sls_id', 'cust_id'],        'type': 'btree'},
+          {'columns': ['gdiv_id', 'source_schema'],                   'type': 'btree'},
+          {'columns': ['is_transaction'],                              'type': 'btree'}
+        ]
+    )
+}} -- =============================================================================
 -- silver_oa_performance
 -- -----------------------------------------------------------------------------
 -- Purpose  : Single source of truth (SSoT) for OA (Outlet Active) performance.
@@ -100,7 +96,7 @@ cb_cover AS (
     FROM (
             SELECT *
             FROM bift.bronze_fcustsls_staging
-            WHERE tahun = { { var('tahun', 2026) } }
+            WHERE tahun = {{ var('tahun', 2026) }}
                 AND periode = 5
         ) cs
         INNER JOIN (
