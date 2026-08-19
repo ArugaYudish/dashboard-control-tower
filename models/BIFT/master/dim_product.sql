@@ -42,7 +42,7 @@ ranked_records as (
 
 )
 
-select
+select distinct on (pcode)
     pcode,
     pcode_nm,
     prlin,
