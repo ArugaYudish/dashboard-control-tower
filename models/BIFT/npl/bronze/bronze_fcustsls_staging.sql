@@ -53,7 +53,7 @@
                 kelurahan_name varchar NULL,
                 latitude varchar NULL,
                 longitude varchar NULL
-            ) PARTITION BY LIST (periode);;
+            ) PARTITION BY LIST (periode);
 
             DO $$
             DECLARE
