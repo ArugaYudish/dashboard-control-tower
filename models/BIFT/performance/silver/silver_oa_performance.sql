@@ -97,12 +97,12 @@ cb_cover AS (
             SELECT *
             FROM bift.bronze_fcustsls_staging
             WHERE tahun = {{ var('tahun', 2026) }}
-                AND periode = 5
+                AND periode > 5
         ) cs
         INNER JOIN (
             SELECT *
             FROM bift.bronze_salesman_hierarchy
-            WHERE sd_id = 'WF0218'
+            -- WHERE sd_id = 'WF0218'
         ) sh ON cs.distributor_id = sh.distributor_id
         AND cs.sls_id = sh.sls_id
         AND cs.source_schema = sh.source_schema
