@@ -153,10 +153,26 @@ LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
 WHERE dfs.channel_id != '999'
-{% if is_incremental() and var('periode', none) is not none %}
-  AND dfs.periode = {{ var('periode') }}
+{% if is_incremental() %}
+  {% if var('periode', none) is not none and var('tahun', none) is not none %}
+    {# Manual backfill: dbt run --vars '{"periode": 8, "tahun": 2026}' #}
+    AND dfs.periode = {{ var('periode') }}
+    AND dfs.tahun = {{ var('tahun') }}
+  {% else %}
+    {# Auto-detect: cek langsung dari raw tables, skip ephemeral yang berat #}
+    AND (dfs.source_schema, dfs.tahun, dfs.periode) IN (
+        SELECT DISTINCT source_schema, tahun, periode
+        FROM (
+            SELECT 'm1' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m1.v_fcustsls_staging
+            UNION ALL
+            SELECT 'm2' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m2.v_fcustsls_staging
+            UNION ALL
+            SELECT 'm3' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m3.v_fcustsls_staging
+        ) raw_check
+        WHERE _airbyte_extracted_at > (
+            SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
+            FROM {{ this }}
+        )
+    )
+  {% endif %}
 {% endif %}
-{% if is_incremental() and var('tahun', none) is not none %}
-  AND dfs.tahun = {{ var('tahun') }}
-{% endif %}
-
