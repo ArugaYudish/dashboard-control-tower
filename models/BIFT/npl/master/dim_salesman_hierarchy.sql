@@ -40,7 +40,7 @@ combined_hierarchy AS (
         mc.period_year                    AS termin_year,
         mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
-    FROM raw_ficom_m1.v_salesman_hierarchy h
+    FROM raw_ficom_m1.mv_salesman_hierarchy_bi h
     JOIN raw_ficom_m1.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
@@ -88,7 +88,7 @@ combined_hierarchy AS (
         mc.period_year                    AS termin_year,
         mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
-    FROM raw_ficom_m2.v_salesman_hierarchy h
+    FROM raw_ficom_m2.mv_salesman_hierarchy_bi h
     JOIN raw_ficom_m2.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
@@ -136,7 +136,7 @@ combined_hierarchy AS (
         mc.period_year                    AS termin_year,
         mc.period_num                     AS termin_period,
         h._airbyte_extracted_at
-    FROM raw_ficom_m3.v_salesman_hierarchy h
+    FROM raw_ficom_m3.mv_salesman_hierarchy_bi h
     JOIN raw_ficom_m3.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
