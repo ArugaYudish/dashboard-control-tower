@@ -69,7 +69,7 @@ cte_grading_dashboard AS (
         is_ec_display,
         is_ec_avis,
         anomaly_status
-    FROM {{ ref('gold_grading_dashboard') }}
+    FROM {{ ref('silver_grading_dashboard') }}
 ),
 
 ----------------------------------------------------------------------
