@@ -220,8 +220,8 @@ SELECT
     -- 4. SALESFORCE & GROUP CHANNEL
     COALESCE(act.salesforce_id_sales, vfs.salesforce_id, 'N/A') AS salesforce_id,
     COALESCE(ms.salesforce_nm, 'UNMAPPED SALESFORCE') AS salesforce_nm,
-    COALESCE(mgc.gsalesforce_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
-    COALESCE(mgc.gsalesforce_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
+    COALESCE(mgc.gsalesforce2_id, 'UNMAPPED_GSALESFORCE') AS gsalesforce_id,
+    COALESCE(mgc.gsalesforce2_nm, 'OTHERS / UNMAPPED') AS gsalesforce_nm,
     COALESCE(mcs.group_channel_id, 'UNMAPPED_CHANNEL') AS group_channel_id,
     COALESCE(mcs.group_channel_nm, 'OTHERS / UNMAPPED') AS group_channel_nm,
     COALESCE(mgc.div_id, 'UNMAPPED_DIV') AS div_id,
