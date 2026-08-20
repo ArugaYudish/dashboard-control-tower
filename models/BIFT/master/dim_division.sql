@@ -1,4 +1,5 @@
 {{ config(
+    schema='bift',
     materialized='table'
 ) }}
 
