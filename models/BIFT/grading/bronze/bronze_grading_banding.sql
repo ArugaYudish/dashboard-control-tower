@@ -1,5 +1,7 @@
 {{ config(
     materialized='incremental',
+    schema='spx',
+    incremental_strategy='delete+insert',
     unique_key=[
         'source_schema',
         'distributor_id',
@@ -15,12 +17,13 @@
 with source_m2 as (
 
     select
-        'm2' as source_schema,
+        'm2'::text as source_schema,
         *
-    from raw_ficom_m2.t_grading_banding
-    where visit_date > '2026-03-01'
+    from raw_ficom_m2.v_grading_banding
+    where visit_date >= '2026-03-01'
     {% if is_incremental() %}
-      and last_update > (select coalesce(max(last_update), '1970-01-01') from {{ this }} where source_schema = 'm2')
+        -- Sinkron dengan window 14 hari view source
+        and last_update >= CURRENT_DATE - INTERVAL '14 DAY'
     {% endif %}
 
 ),
@@ -28,12 +31,13 @@ with source_m2 as (
 source_m3 as (
 
     select
-        'm3' as source_schema,
+        'm3'::text as source_schema,
         *
-    from raw_ficom_m3.t_grading_banding
-    where visit_date > '2026-03-01'
+    from raw_ficom_m3.v_grading_banding
+    where visit_date >= '2026-03-01'
     {% if is_incremental() %}
-      and last_update > (select coalesce(max(last_update), '1970-01-01') from {{ this }} where source_schema = 'm3')
+        -- Sinkron dengan window 14 hari view source
+        and last_update >= CURRENT_DATE - INTERVAL '14 DAY'
     {% endif %}
 
 ),
