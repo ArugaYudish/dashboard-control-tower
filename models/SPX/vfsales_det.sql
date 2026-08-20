@@ -5,7 +5,7 @@
     pre_hook=[
       "{% if is_incremental() %}
          DELETE FROM spx.vfsales_det 
-         WHERE inv_date >= '2026-07-23 00:00:00.000';
+         WHERE inv_date >= CURRENT_DATE - INTERVAL '3 DAY';
        {% endif %}"
     ]
   )
@@ -16,5 +16,5 @@ select
 from raw_ho.vfsales_det
 
 {% if is_incremental() %}
-    where inv_date >= '2026-07-23 00:00:00.000'
+    where inv_date >= CURRENT_DATE - INTERVAL '3 DAY'
 {% endif %}
