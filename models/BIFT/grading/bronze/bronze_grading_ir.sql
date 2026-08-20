@@ -1,6 +1,6 @@
 {{ config(
     materialized='incremental',
-    schema='spx',
+    schema='bift',
     pre_hook=[
       "{% if is_incremental() %}
          -- Sapu bersih data 3 hari terakhir di tabel target untuk M2 dan M3

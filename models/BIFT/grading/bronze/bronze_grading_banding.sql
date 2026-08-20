@@ -1,6 +1,6 @@
 {{ config(
     materialized='incremental',
-    schema='spx',
+    schema='bift',
     incremental_strategy='delete+insert',
     unique_key=[
         'source_schema',
