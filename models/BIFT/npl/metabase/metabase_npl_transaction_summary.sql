@@ -22,6 +22,14 @@ WITH outlet_stats AS (
             END
         )                              AS total_qty_carton,
 
+        sum(
+            CASE WHEN 1=1
+                [[ AND {{pcodes}} ]]
+                [[ AND {{subbrands}} ]]
+                THEN inv_val ELSE 0
+            END
+        )                              AS total_inv_val,
+
         max(is_transaction)            AS is_tx
 
     FROM default.gold_npl_outlet_detail_dev
@@ -66,7 +74,10 @@ SELECT
     "Channel",
 
     round(
-        total_qty_carton / nullIf(total_order_count, 0), 2
+        CASE
+            WHEN {{dropsize_by}} = 'inv_val' THEN total_inv_val / nullIf(total_order_count, 0)
+            ELSE total_qty_carton / nullIf(total_order_count, 0)
+        END, 2
     )                                               AS "Total Dropsize",
 
     CASE WHEN total_order_count = 1  THEN 1 ELSE 0 END AS "Non Repeat",

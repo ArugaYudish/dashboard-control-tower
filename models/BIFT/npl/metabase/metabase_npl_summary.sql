@@ -29,7 +29,16 @@ WITH outlet_orders AS (
                 [[ AND {{subbrands}} ]]
                 THEN qty_carton ELSE 0
             END
-        )                                                                   AS pcode_qty_carton
+        )                                                                   AS pcode_qty_carton,
+
+        sum(
+            CASE
+                WHEN 1=1
+                [[ AND {{pcodes}} ]]
+                [[ AND {{subbrands}} ]]
+                THEN inv_val ELSE 0
+            END
+        )                                                                   AS pcode_inv_val
 
     FROM default.gold_npl_outlet_detail_dev
     WHERE 1=1
@@ -76,7 +85,11 @@ SELECT
         (uniqExactIf(dist_cust_key, pcode_order_count >= 1) / nullIf(uniqExactIf(dist_cust_key, is_cb_cover = 1), 0)) * 100, 2
     )                                                                               AS "%OA",
     round(
-        sum(pcode_qty_carton) / nullIf(sum(pcode_order_count), 0), 2
+        CASE
+            WHEN {{dropsize_by}} = 'inv_val'
+            THEN sum(pcode_inv_val) / nullIf(sum(pcode_order_count), 0)
+            ELSE sum(pcode_qty_carton) / nullIf(sum(pcode_order_count), 0)
+        END, 2
     )                                                                               AS "Total Dropsize",
 
     uniqExactIf(dist_cust_key, pcode_order_count = 1)                              AS "Non Repeat",

@@ -280,6 +280,7 @@ WHERE sm.sls_id IS NOT NULL
           sm.sls_nm ILIKE '%TOPPING%' OR
           sm.sls_nm ILIKE '% MT %' OR
           sm.sls_nm ILIKE '% MTI %' OR
-          sm.sls_nm ILIKE '%-MTI %'
+          sm.sls_nm ILIKE '%-MTI %' OR
+          sm.sls_nm ILIKE '% MTI%'
       )
   )
