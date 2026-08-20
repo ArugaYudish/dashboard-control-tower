@@ -273,7 +273,7 @@ LEFT JOIN bift.dim_product mp
     ON act.pcode = mp.pcode::varchar
 
 LEFT JOIN bift.dim_mapping_subbrand mms 
-    ON (mp.prlin::varchar || mp.brand::varchar || mp.sbra1::varchar) = mms.subbrand_id::varchar
+    ON mp.subbrand_id::varchar = mms.subbrand_id::varchar
 
 -- MASTER DISTRIBUTOR & CUSTOMER
 LEFT JOIN bift.dim_distributor md ON act.distributor_id = md.distributor_id::varchar
