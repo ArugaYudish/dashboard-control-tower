@@ -1,55 +1,22 @@
 {{
     config(
         schema='bift',
-        materialized='table',
+        materialized='incremental',
         alias='dim_customer',
+        incremental_strategy='delete+insert',
+        unique_key=['subdist_id', 'custno'],
         indexes=[
-          {'columns': ['distributor_id', 'cust_id'], 'type': 'btree'}
+            {'columns': ['subdist_id', 'custno'], 'type': 'btree'}
         ]
     )
 }}
 
-WITH combined_customer AS (
-    SELECT 
-        'm1' AS source_schema,
-        mc.*,
-        mvol.latitude,
-        mvol.longitude
-    FROM raw_ficom_m1.m_customer mc
-    LEFT JOIN raw_ficom_m1.m_validasi_outlet_last mvol 
-        ON mc.distributor_id = mvol.distributor_id 
-       AND mc.cust_id = mvol.cust_id 
-
-    UNION ALL
-
-    SELECT 
-        'm2' AS source_schema,
-        mc.*,
-        mvol.latitude,
-        mvol.longitude
-    FROM raw_ficom_m2.m_customer mc
-    LEFT JOIN raw_ficom_m2.m_validasi_outlet_last mvol 
-        ON mc.distributor_id = mvol.distributor_id 
-       AND mc.cust_id = mvol.cust_id 
-
-    UNION ALL
-
-    SELECT 
-        'm3' AS source_schema,
-        mc.*,
-        mvol.latitude,
-        mvol.longitude
-    FROM raw_ficom_m3.m_customer mc
-    LEFT JOIN raw_ficom_m3.m_validasi_outlet_last mvol 
-        ON mc.distributor_id = mvol.distributor_id 
-       AND mc.cust_id = mvol.cust_id 
-)
-SELECT DISTINCT ON (distributor_id, cust_id)
+select
     *
-FROM combined_customer
-WHERE cust_id IS NOT NULL 
-  AND distributor_id IS NOT NULL
-ORDER BY 
-    distributor_id, 
-    cust_id, 
-    _airbyte_extracted_at DESC NULLS LAST
+from raw_ho.v_fcustmst
+where custno is not null 
+  and subdist_id is not null
+{% if is_incremental() %}
+  -- Ambil data master customer yang di-update dalam 20 hari terakhir
+  and clastupd >= CURRENT_DATE - INTERVAL '20 DAY'
+{% endif %}
