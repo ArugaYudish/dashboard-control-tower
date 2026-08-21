@@ -18,7 +18,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (DARI raw_ho.fmaster)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (CONCAT PRLIN + BRAND + SBRA1)
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
@@ -63,7 +63,7 @@ cte_master_salesman AS (
 ),
 
 ----------------------------------------------------------------------
--- 2. BACKBONE KEGIATAN HARIAN (DIBATASI PERIODE 6 & 7 TAHUN 2026)
+-- 2. BACKBONE KEGIATAN HARIAN (KHUSUS PERIODE 7 WEEK 28 & 29)
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
@@ -80,7 +80,7 @@ cte_backbone AS (
         week
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND tahun = 2026 AND periode IN (6, 7)
+      AND tahun = 2026 AND periode = 7 AND week IN (28, 29)
 
     UNION
 
@@ -97,11 +97,12 @@ cte_backbone AS (
         c.period AS periode,
         c.week AS week
     FROM {{ source('bift', 'bronze_rcall_avis_d') }} a
-    LEFT JOIN spx.m_cycle3 c 
+    INNER JOIN spx.m_cycle3 c 
         ON a.visit_date::date = c.cdate::date
+       AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_product_gdiv pg 
         ON a.pcode::varchar = pg.pcode
-    WHERE c.year = 2026 AND c.period IN (6, 7)
+    WHERE a.visit_date >= '2026-07-06' AND a.visit_date <= '2026-07-19'
 
     UNION
 
@@ -119,11 +120,11 @@ cte_backbone AS (
         week
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 0
-      AND tahun = 2026 AND periode IN (6, 7)
+      AND tahun = 2026 AND periode = 7
 ),
 
 ----------------------------------------------------------------------
--- 3. DEDUP BACKBONE (1 BARIS UNIK: GDIV + DIST + SLS + OUTLET + PCODE + TGL)
+-- 3. DEDUP BACKBONE
 ----------------------------------------------------------------------
 cte_unique_activity AS (
     SELECT 
@@ -142,7 +143,7 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 4. AGREGASI GRADING HARIAN (DIBATASI PERIODE 6 & 7)
+-- 4. AGREGASI GRADING HARIAN
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
@@ -155,8 +156,9 @@ cte_grading_daily AS (
         MAX(COALESCE(b.grade, g.grade)) AS final_grade,
         MAX(COALESCE(b.kode_ap::varchar, g.kode_ap::varchar)) AS kode_ap
     FROM {{ source('bift', 'bronze_grading_ir') }} g
-    LEFT JOIN spx.m_cycle3 c 
+    INNER JOIN spx.m_cycle3 c 
         ON g.visit_date::date = c.cdate::date
+       AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_master_salesman ms
         ON COALESCE(g.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
        AND g.distributor_id::varchar              = ms.distributor_id::varchar
@@ -170,12 +172,12 @@ cte_grading_daily AS (
        AND COALESCE(g.team_id::varchar, '')       = COALESCE(b.team_id::varchar, '')
        AND COALESCE(g.salesforce_id::varchar, '') = COALESCE(b.salesforce_id::varchar, '')
        AND g.visit_date::date                     = b.visit_date::date
-    WHERE c.year = 2026 AND c.period IN (6, 7)
+    WHERE g.visit_date >= '2026-07-06' AND g.visit_date <= '2026-07-19'
     GROUP BY 1, 2, 3, 4, 5, 6
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI IR DISPLAY (DIBATASI PERIODE 6 & 7)
+-- 5. AGREGASI IR DISPLAY
 ----------------------------------------------------------------------
 cte_ir_daily AS (
     SELECT 
@@ -190,8 +192,9 @@ cte_ir_daily AS (
         SUM(COALESCE(m.count_facing, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_ir_detected
     FROM {{ source('bift', 'bronze_rcall_avis_d') }} a
-    LEFT JOIN spx.m_cycle3 c 
+    INNER JOIN spx.m_cycle3 c 
         ON a.visit_date::date = c.cdate::date
+       AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_product_gdiv pg
         ON a.pcode::varchar = pg.pcode
     LEFT JOIN (
@@ -205,6 +208,7 @@ cte_ir_daily AS (
             visit_date::date AS visit_date,
             MAX(count_facing::integer) AS count_facing
         FROM {{ source('bift', 'bronze_rcall_avis_manual') }}
+        WHERE visit_date >= '2026-07-06' AND visit_date <= '2026-07-19'
         GROUP BY 1, 2, 3, 4, 5, 6, 7
     ) m 
         ON COALESCE(a.source_schema::varchar, '') = COALESCE(m.source_schema::varchar, '')
@@ -214,12 +218,12 @@ cte_ir_daily AS (
        AND a.kode_ap::varchar                     = m.kode_ap
        AND a.pcode::varchar                       = m.pcode 
        AND a.visit_date::date                     = m.visit_date
-    WHERE c.year = 2026 AND c.period IN (6, 7)
+    WHERE a.visit_date >= '2026-07-06' AND a.visit_date <= '2026-07-19'
     GROUP BY 1, 2, 3, 4, 5, 6, 7
 ),
 
 ----------------------------------------------------------------------
--- 6. AGREGASI TRANSAKSI SALES SFA (DIBATASI PERIODE 6 & 7)
+-- 6. AGREGASI TRANSAKSI SALES SFA
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
@@ -241,12 +245,12 @@ cte_sales_daily AS (
         SUM(inv_val) AS total_inv_val
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND tahun = 2026 AND periode IN (6, 7)
+      AND tahun = 2026 AND periode = 7 AND week IN (28, 29)
     GROUP BY 1, 2, 3, 4, 5, 6, 7
 ),
 
 ----------------------------------------------------------------------
--- 7. MASTER OUTLET (MURNI LEVEL TOKO)
+-- 7. MASTER OUTLET
 ----------------------------------------------------------------------
 cte_master_outlet AS (
     SELECT DISTINCT ON (source_schema, distributor_id, cust_id)
@@ -265,7 +269,7 @@ cte_master_outlet AS (
 ),
 
 ----------------------------------------------------------------------
--- 8. TARGET NMRC HARIAN (DIBATASI PERIODE 6 & 7)
+-- 8. TARGET NMRC HARIAN
 ----------------------------------------------------------------------
 cte_nmrc_daily AS (
     SELECT 
@@ -283,7 +287,7 @@ cte_nmrc_daily AS (
         ON COALESCE(n.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
        AND n.distributor_id::varchar              = ms.distributor_id::varchar
        AND n.sls_id::varchar                      = ms.sls_id::varchar
-    WHERE n.tahun = 2026 AND n.periode IN (6, 7)
+    WHERE n.tahun = 2026 AND n.periode = 7 AND n.week IN (28, 29)
     GROUP BY 1, 2, 3, 4, 5
 )
 
@@ -363,7 +367,7 @@ SELECT
     CASE WHEN COALESCE(ir.is_ir_detected, 0) = 1 THEN 1 ELSE 0 END AS is_ec_display,
     CASE WHEN (COALESCE(sal.total_inv_qty, 0) > 0 AND COALESCE(ir.is_ir_detected, 0) = 1) THEN 1 ELSE 0 END AS is_ec_avis,
     
-    -- ANOMALY STATUS / KUADRAN PRODUKTIVITAS
+    -- ANOMALY STATUS
     CASE 
         WHEN COALESCE(ir.is_ir_detected, 0) = 1 AND COALESCE(sal.total_inv_qty, 0) > 0 
             THEN '1. IR Terdeteksi & Ada Transaksi'
@@ -382,14 +386,14 @@ LEFT JOIN cte_master_outlet mo
    AND b.distributor_id = mo.distributor_id
    AND b.outlet_id      = mo.outlet_id
 
--- 2. JOIN MASTER SALESMAN (TERKUNCI GDIV)
+-- 2. JOIN MASTER SALESMAN
 LEFT JOIN cte_master_salesman ms
     ON b.source_schema  = ms.source_schema
    AND b.gdiv_id        = ms.gdiv_id
    AND b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES (TERKUNCI GDIV)
+-- 3. JOIN TRANSAKSI SALES
 LEFT JOIN cte_sales_daily sal
     ON b.source_schema   = sal.source_schema
    AND b.gdiv_id         = sal.gdiv_id
@@ -399,11 +403,11 @@ LEFT JOIN cte_sales_daily sal
    AND b.pcode           = sal.pcode
    AND b.activity_date   = sal.sales_date
 
--- 4. JOIN MASTER PRODUK INFO DARI fmaster & subbrand
+-- 4. JOIN MASTER PRODUK INFO
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO (TERKUNCI GDIV)
+-- 5. JOIN GRADE TOKO
 LEFT JOIN cte_grading_daily gst
     ON b.source_schema   = gst.source_schema
    AND b.gdiv_id         = gst.gdiv_id
@@ -412,7 +416,7 @@ LEFT JOIN cte_grading_daily gst
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
--- 6. JOIN IR DISPLAY (TERKUNCI GDIV)
+-- 6. JOIN IR DISPLAY
 LEFT JOIN cte_ir_daily ir
     ON b.source_schema   = ir.source_schema
    AND b.gdiv_id         = ir.gdiv_id
@@ -422,7 +426,7 @@ LEFT JOIN cte_ir_daily ir
    AND b.pcode           = ir.pcode
    AND b.activity_date   = ir.visit_date
 
--- 7. JOIN TARGET NMRC (TERKUNCI GDIV)
+-- 7. JOIN TARGET NMRC
 LEFT JOIN cte_nmrc_daily nm
     ON b.source_schema   = nm.source_schema
    AND b.gdiv_id         = nm.gdiv_id
