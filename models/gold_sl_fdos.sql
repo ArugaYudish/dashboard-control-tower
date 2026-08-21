@@ -1,7 +1,7 @@
 {{ config(
     materialized='table',
     indexes=[
-      {'columns': ['week', 'subdist_id', 'kdbarang']}
+      {'columns': ['week', 'year', 'subdist_id', 'kdbarang']}
     ],
     pre_hook="SET LOCAL work_mem = '256MB'"
 ) }}
@@ -24,14 +24,17 @@ parsed_t_sl_subdist AS (
     COALESCE(t.so_awal, 0)    AS so_awal_num,
     COALESCE(t.so_confirm, 0) AS so_confirm_num,
     COALESCE(t.qty_bill, 0)   AS qty_bill_num,
-    -- Kunci week untuk avg_last_3_week. `week` bisa bertipe text di sumber,
-    -- jadi hanya nilai numerik yang dipakai; sisanya NULL dan tidak dihitung.
+    -- Kunci week untuk avg_last_3_week. `week` sekarang numeric NOT NULL di
+    -- sumber, tapi guard-nya dipertahankan supaya nilai non-integer (mis. 32.5)
+    -- jadi NULL dan tidak ikut dihitung, bukan dibulatkan diam-diam.
     CASE WHEN t.week::text ~ '^[0-9]+$' THEN t.week::text::int END AS week_num
   FROM spx.v_sl_subdist t
   -- Hanya ambil ket_week berformat 'XX.YYYY' (XX = minggu, YYYY = tahun),
   -- contoh '32.2026' atau '32.2026 SPK'. Pola wajib menyertakan tahun 4 digit
   -- supaya tanggal seperti '20.08.2026' tidak ikut lolos -- setelah '20.' isinya
   -- '08.2', bukan 4 digit. Batas [^0-9] di akhir mencegah '32.20261' ikut cocok.
+  -- Tahun kalender TIDAK lagi diambil dari sini (lihat kolom `year`), tapi
+  -- format ini masih wajib karena so_week dan realisasi memakai LEFT(ket_week, 2).
   WHERE t.ket_week ~ '^[0-9]{2}\.[0-9]{4}([^0-9]|$)'
 ),
 -- NOT MATERIALIZED: CTE ini dibaca dua cabang (detail + weekly_ratio). Tanpa
@@ -42,17 +45,12 @@ calculated_t_sl_subdist AS NOT MATERIALIZED (
   SELECT
     t.*,
     CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal,
-    -- Tahun kalender untuk week_num, diambil dari ket_week ('XX.YYYY' -- dijamin
-    -- oleh filter di parsed_t_sl_subdist), dikoreksi kalau `week` ada di sisi
-    -- lain pergantian tahun dibanding week SO-nya (SO '52.2026' yang ter-record
-    -- di week 01 berarti tahun 2027, dan sebaliknya).
-    CASE
-      WHEN LEFT(t.ket_week, 2)::int >= 50 AND t.week_num <= 3
-        THEN SUBSTRING(t.ket_week FROM 4 FOR 4)::int + 1
-      WHEN LEFT(t.ket_week, 2)::int <= 3  AND t.week_num >= 50
-        THEN SUBSTRING(t.ket_week FROM 4 FOR 4)::int - 1
-      ELSE SUBSTRING(t.ket_week FROM 4 FOR 4)::int
-    END AS week_year
+    -- Tahun kalender untuk week_num. Sejak t_sl_subdist punya kolom `year`
+    -- (int4 NOT NULL, bagian dari PK bersama `week`), tahun diambil langsung
+    -- dari sumber. Sebelumnya nilai ini ditebak dari ket_week + koreksi manual
+    -- untuk SO yang menyeberang pergantian tahun (SO '52.2026' yang ter-record
+    -- di week 01 = 2027); tebakan itu tidak diperlukan lagi.
+    t.year AS week_year
   FROM parsed_t_sl_subdist t
 ),
 -- m_cycle3 dipakai per tanggal billing. Di-dedupe per tanggal supaya (a) tidak
@@ -78,7 +76,7 @@ results AS (
     ma.acc_name AS sls_div,
     mmsr.region_id || ma.acc_name AS key1, vsh.grsm_name AS sales_group,
     ttss.plant, ttss.distributor_id AS subdist_id, mdist.distributor_nm, ttss.tgl_so,
-    ttss.po_no AS so_no, ttss.ket_week, ttss.week, ttss.week_num, ttss.week_year,
+    ttss.po_no AS so_no, ttss.ket_week, ttss.week, ttss.year, ttss.week_num, ttss.week_year,
     ttss.sku AS kdbarang, mp.pcodename AS nmbarang,
     mp.subbrand_id, msb.subbrand_nm,
     ttss.so_awal_num AS so_awal, ttss.so_confirm_num AS so_confirm, ttss.tgl_billing, ttss.bill_no,
@@ -166,7 +164,7 @@ totals AS (
 final_calc AS (
 SELECT
   t.warehouse_name, t.region_code, t.region_nm, t.division, t.group_division, t.sls_div, t.key1, t.sales_group, t.plant, 
-  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.week_num, t.week_year,
+  t.subdist_id, t.distributor_nm, t.tgl_so, t.so_no, t.ket_week, t.week, t.year, t.week_num, t.week_year,
   t.kdbarang, t.nmbarang,
   t.subbrand_id, t.subbrand_nm, t.so_awal, t.so_confirm,
   t.tgl_billing, t.bill_no, t.qty_bill, t.reason, t.status_reason, t.result_o, t.result_m, 
@@ -254,7 +252,10 @@ END AS so_day,
 CASE WHEN fc.calculated_keterangan = 'FDOS' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_fdos,
 CASE WHEN fc.calculated_keterangan = 'SPK' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spk,
 CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END AS so_awal_spo, reason.group_reason,
-fc.week, fc.week_num, fc.week_year
+-- week_year sekarang isinya persis sama dengan year; dipertahankan hanya supaya
+-- chart Superset yang sudah memakai week_year tidak putus. Aman dihapus setelah
+-- chart-nya dipindah ke year.
+fc.week, fc.year, fc.week_num, fc.week_year
 FROM final_calc fc
  left join reason on fc.reason = reason.reason_id
 ),
