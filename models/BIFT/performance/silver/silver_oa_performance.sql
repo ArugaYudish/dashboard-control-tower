@@ -162,8 +162,8 @@ trx AS (
         f.sbu_nm
     FROM (
             SELECT *
-            FROM bift.mv_fsales_det
-            WHERE prd_no::numeric = 5
+            FROM spx.vfsales_det
+            WHERE prd_no::numeric >= 4
         ) as vd
         LEFT JOIN bift.dim_product f ON vd.pcode = f.pcode
 ),
