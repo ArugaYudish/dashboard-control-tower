@@ -18,7 +18,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (CONCAT PRLIN + BRAND + SBRA1)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (OPSI 2: bift.dim_mapping_subbrand LANGSUNG)
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
@@ -33,7 +33,7 @@ cte_product_gdiv AS (
         mms.div_id::varchar         AS div_id,
         mms.div_nm::varchar         AS div_nm
     FROM raw_ho.fmaster p
-    LEFT JOIN {{ source('bift', 'dim_mapping_subbrand') }} mms 
+    LEFT JOIN bift.dim_mapping_subbrand mms 
         ON CONCAT(
             COALESCE(p.prlin::varchar, ''), 
             COALESCE(p.brand::varchar, ''), 
@@ -96,7 +96,7 @@ cte_backbone AS (
         c.year AS tahun,
         c.period AS periode,
         c.week AS week
-    FROM {{ source('bift', 'bronze_rcall_avis_d') }} a
+    FROM bift.bronze_rcall_avis_d a
     INNER JOIN spx.m_cycle3 c 
         ON a.visit_date::date = c.cdate::date
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
@@ -155,7 +155,7 @@ cte_grading_daily AS (
         g.visit_date::date AS visit_date,
         MAX(COALESCE(b.grade, g.grade)) AS final_grade,
         MAX(COALESCE(b.kode_ap::varchar, g.kode_ap::varchar)) AS kode_ap
-    FROM {{ source('bift', 'bronze_grading_ir') }} g
+    FROM bift.bronze_grading_ir g
     INNER JOIN spx.m_cycle3 c 
         ON g.visit_date::date = c.cdate::date
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
@@ -163,7 +163,7 @@ cte_grading_daily AS (
         ON COALESCE(g.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
        AND g.distributor_id::varchar              = ms.distributor_id::varchar
        AND g.sls_id::varchar                      = ms.sls_id::varchar
-    LEFT JOIN {{ source('bift', 'bronze_grading_banding') }} b
+    LEFT JOIN bift.bronze_grading_banding b
         ON COALESCE(g.source_schema::varchar, '') = COALESCE(b.source_schema::varchar, '')
        AND g.distributor_id::varchar              = b.distributor_id::varchar
        AND g.outlet_id::varchar                   = b.outlet_id::varchar
@@ -191,7 +191,7 @@ cte_ir_daily AS (
         MAX(a.kode_ap::varchar) AS kode_ap,
         SUM(COALESCE(m.count_facing, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_ir_detected
-    FROM {{ source('bift', 'bronze_rcall_avis_d') }} a
+    FROM bift.bronze_rcall_avis_d a
     INNER JOIN spx.m_cycle3 c 
         ON a.visit_date::date = c.cdate::date
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
@@ -207,7 +207,7 @@ cte_ir_daily AS (
             pcode::varchar AS pcode, 
             visit_date::date AS visit_date,
             MAX(count_facing::integer) AS count_facing
-        FROM {{ source('bift', 'bronze_rcall_avis_manual') }}
+        FROM bift.bronze_rcall_avis_manual
         WHERE visit_date >= '2026-07-06' AND visit_date <= '2026-07-19'
         GROUP BY 1, 2, 3, 4, 5, 6, 7
     ) m 
@@ -282,7 +282,7 @@ cte_nmrc_daily AS (
         MAX(n.tcall_glb::numeric) AS tcall_glb,
         MAX(n.rcall_kpl::numeric) AS rcall_kpl,
         MAX(n.ec_kpl::numeric) AS ec_kpl
-    FROM {{ source('bift', 'bronze_nmrc_subdetail') }} n
+    FROM bift.bronze_nmrc_subdetail n
     LEFT JOIN cte_master_salesman ms
         ON COALESCE(n.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
        AND n.distributor_id::varchar              = ms.distributor_id::varchar
