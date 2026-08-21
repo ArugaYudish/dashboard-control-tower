@@ -302,6 +302,15 @@ weekly_ratio AS (
   JOIN spx.m_acc ma      ON mad.acc_id = ma.acc_id
   WHERE ttss.week_num IS NOT NULL
     AND ma.acc_id NOT IN ('AC0000', 'MT')
+    AND (
+      ttss.plant IN (
+        '8003', '8004', '8006', '8009', '8010', '8011',
+        '8012', '8013', '8015', '8019', '8201', '8207'
+      )
+      OR EXISTS (
+        SELECT 1 FROM spx.m_plant mplant WHERE mplant.plant_id = ttss.plant
+      )
+    )
   GROUP BY 1, 2, 3, 4
 ),
 -- Urutan week absolut dari week yang benar-benar ada di data. Nomor urut ini
