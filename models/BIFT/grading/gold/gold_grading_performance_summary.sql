@@ -287,7 +287,7 @@ cte_nmrc_daily AS (
         ON COALESCE(n.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
        AND n.distributor_id::varchar              = ms.distributor_id::varchar
        AND n.sls_id::varchar                      = ms.sls_id::varchar
-    WHERE n.tahun = 2026 AND n.periode = 7 AND n.week IN (28, 29)
+    WHERE n.tahun::integer = 2026 AND n.periode::integer = 7 AND n.week::integer IN (28, 29)
     GROUP BY 1, 2, 3, 4, 5
 )
 
