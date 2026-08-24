@@ -28,8 +28,8 @@ cte_product_gdiv AS (
         mms.subbrand_nm::varchar    AS subbrand_nm,
         mms.cat_id::varchar         AS cat_id,
         mms.cat_nm::varchar         AS cat_nm,
-        mms.gdiv_id::varchar        AS gdiv_id,
-        mms.gdiv_nm::varchar        AS gdiv_nm,
+        mms.gdiv_id::varchar        AS product_gdiv_id,
+        mms.gdiv_nm::varchar        AS product_gdiv_nm,
         mms.div_id::varchar         AS div_id,
         mms.div_nm::varchar         AS div_nm
     FROM raw_ho.fmaster p
@@ -107,20 +107,22 @@ cte_backbone AS (
 
     UNION
 
-    -- Sumber 2: Kunjungan Foto IR Display
+    -- Sumber 2: Kunjungan Foto IR Display (gdiv_id diselaraskan ke Salesman GDIV)
     SELECT 
-        COALESCE(a.source_schema::varchar, 'spx') AS source_schema,
-        COALESCE(pg.gdiv_id, 'UNKNOWN_GDIV')      AS gdiv_id,
-        a.distributor_id::varchar                 AS distributor_id,
-        a.sls_id::varchar                         AS sls_id,
-        a.outlet_id::varchar                      AS outlet_id,
-        a.pcode::varchar                          AS pcode,
-        a.visit_date::date                        AS activity_date,
-        2026::numeric                             AS tahun,
-        7::numeric                                AS periode,
-        28::numeric                               AS week
+        COALESCE(ms.source_schema, a.source_schema::varchar, 'spx') AS source_schema,
+        COALESCE(ms.gdiv_id, 'UNKNOWN_GDIV')                        AS gdiv_id,
+        a.distributor_id::varchar                                   AS distributor_id,
+        a.sls_id::varchar                                           AS sls_id,
+        a.outlet_id::varchar                                        AS outlet_id,
+        a.pcode::varchar                                            AS pcode,
+        a.visit_date::date                                          AS activity_date,
+        2026::numeric                                               AS tahun,
+        7::numeric                                                  AS periode,
+        28::numeric                                                 AS week
     FROM bift.bronze_rcall_avis_d a
-    LEFT JOIN cte_product_gdiv pg ON a.pcode::varchar = pg.pcode
+    LEFT JOIN cte_master_salesman ms
+        ON a.distributor_id::varchar = ms.distributor_id
+       AND a.sls_id::varchar         = ms.sls_id
     WHERE a.visit_date >= '2026-07-13' AND a.visit_date <= '2026-07-14'
 
     UNION
@@ -226,7 +228,7 @@ cte_ir_daily AS (
 ),
 
 ----------------------------------------------------------------------
--- 7. AGREGASI TRANSAKSI SALES SFA (DIPERBAIKI: GRAIN TANGGAL & SCHEMA)
+-- 7. AGREGASI TRANSAKSI SALES SFA
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
@@ -271,7 +273,7 @@ cte_nmrc_daily AS (
 )
 
 ----------------------------------------------------------------------
--- MAIN SELECT (JOIN 1:1 TERKUNCI DENGAN PRESISI)
+-- MAIN SELECT
 ----------------------------------------------------------------------
 SELECT 
     b.source_schema,
