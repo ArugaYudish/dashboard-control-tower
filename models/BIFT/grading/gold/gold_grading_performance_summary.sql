@@ -18,7 +18,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (OPSI 2: bift.dim_mapping_subbrand LANGSUNG)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (CONCAT: prlin + brand + sbra1)
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
@@ -45,7 +45,7 @@ cte_product_gdiv AS (
 -- 1. MASTER SALESMAN HIERARKI (DARI SILVER OA)
 ----------------------------------------------------------------------
 cte_master_salesman AS (
-    SELECT DISTINCT ON (source_schema, distributor_id, sls_id)
+    SELECT DISTINCT ON (gdiv_id, distributor_id, sls_id)
         source_schema,
         gdiv_id,
         gdiv_nm,
@@ -59,7 +59,7 @@ cte_master_salesman AS (
         rsm_id, rsm_nm,
         ss_id, ss_nm
     FROM {{ ref('silver_oa_performance') }}
-    ORDER BY source_schema, distributor_id, sls_id, tahun DESC, periode DESC
+    ORDER BY gdiv_id, distributor_id, sls_id, tahun DESC, periode DESC
 ),
 
 ----------------------------------------------------------------------
@@ -86,8 +86,8 @@ cte_backbone AS (
 
     -- Sumber 2: Kunjungan Foto IR Display
     SELECT 
-        a.source_schema::varchar AS source_schema,
-        COALESCE(pg.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
+        COALESCE(ms.source_schema, 'spx') AS source_schema,
+        COALESCE(pg.gdiv_id, ms.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
         a.distributor_id::varchar AS distributor_id,
         a.sls_id::varchar AS sls_id,
         a.outlet_id::varchar AS outlet_id,
@@ -102,6 +102,9 @@ cte_backbone AS (
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_product_gdiv pg 
         ON a.pcode::varchar = pg.pcode
+    LEFT JOIN cte_master_salesman ms
+        ON a.distributor_id::varchar = ms.distributor_id::varchar
+       AND a.sls_id::varchar         = ms.sls_id::varchar
     WHERE a.visit_date >= '2026-07-06' AND a.visit_date <= '2026-07-19'
 
     UNION
@@ -143,11 +146,10 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 4. AGREGASI GRADING HARIAN
+-- 4. AGREGASI GRADING HARIAN (TANPA KOLOM source_schema DI BRONZE)
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
-        g.source_schema::varchar AS source_schema,
         COALESCE(ms.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
         g.distributor_id::varchar AS distributor_id,
         g.sls_id::varchar AS sls_id,
@@ -160,12 +162,10 @@ cte_grading_daily AS (
         ON g.visit_date::date = c.cdate::date
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_master_salesman ms
-        ON COALESCE(g.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
-       AND g.distributor_id::varchar              = ms.distributor_id::varchar
-       AND g.sls_id::varchar                      = ms.sls_id::varchar
+        ON g.distributor_id::varchar = ms.distributor_id::varchar
+       AND g.sls_id::varchar         = ms.sls_id::varchar
     LEFT JOIN bift.bronze_grading_banding b
-        ON COALESCE(g.source_schema::varchar, '') = COALESCE(b.source_schema::varchar, '')
-       AND g.distributor_id::varchar              = b.distributor_id::varchar
+        ON g.distributor_id::varchar              = b.distributor_id::varchar
        AND g.outlet_id::varchar                   = b.outlet_id::varchar
        AND g.sls_id::varchar                      = b.sls_id::varchar
        AND g.kode_ap::varchar                     = b.kode_ap::varchar
@@ -173,16 +173,15 @@ cte_grading_daily AS (
        AND COALESCE(g.salesforce_id::varchar, '') = COALESCE(b.salesforce_id::varchar, '')
        AND g.visit_date::date                     = b.visit_date::date
     WHERE g.visit_date >= '2026-07-06' AND g.visit_date <= '2026-07-19'
-    GROUP BY 1, 2, 3, 4, 5, 6
+    GROUP BY 1, 2, 3, 4, 5
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI IR DISPLAY
+-- 5. AGREGASI IR DISPLAY (TANPA KOLOM source_schema DI BRONZE)
 ----------------------------------------------------------------------
 cte_ir_daily AS (
     SELECT 
-        a.source_schema::varchar AS source_schema,
-        COALESCE(pg.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
+        COALESCE(pg.gdiv_id, ms.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
         a.distributor_id::varchar AS distributor_id,
         a.sls_id::varchar AS sls_id,
         a.outlet_id::varchar AS outlet_id,
@@ -197,9 +196,11 @@ cte_ir_daily AS (
        AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_product_gdiv pg
         ON a.pcode::varchar = pg.pcode
+    LEFT JOIN cte_master_salesman ms
+        ON a.distributor_id::varchar = ms.distributor_id::varchar
+       AND a.sls_id::varchar         = ms.sls_id::varchar
     LEFT JOIN (
         SELECT 
-            source_schema::varchar AS source_schema,
             distributor_id::varchar AS distributor_id, 
             outlet_id::varchar AS outlet_id,
             sls_id::varchar AS sls_id, 
@@ -209,17 +210,16 @@ cte_ir_daily AS (
             MAX(count_facing::integer) AS count_facing
         FROM bift.bronze_rcall_avis_manual
         WHERE visit_date >= '2026-07-06' AND visit_date <= '2026-07-19'
-        GROUP BY 1, 2, 3, 4, 5, 6, 7
+        GROUP BY 1, 2, 3, 4, 5, 6
     ) m 
-        ON COALESCE(a.source_schema::varchar, '') = COALESCE(m.source_schema::varchar, '')
-       AND a.distributor_id::varchar              = m.distributor_id 
-       AND a.outlet_id::varchar                   = m.outlet_id
-       AND a.sls_id::varchar                      = m.sls_id 
-       AND a.kode_ap::varchar                     = m.kode_ap
-       AND a.pcode::varchar                       = m.pcode 
-       AND a.visit_date::date                     = m.visit_date
+        ON a.distributor_id::varchar = m.distributor_id 
+       AND a.outlet_id::varchar      = m.outlet_id
+       AND a.sls_id::varchar         = m.sls_id 
+       AND a.kode_ap::varchar        = m.kode_ap
+       AND a.pcode::varchar          = m.pcode 
+       AND a.visit_date::date        = m.visit_date
     WHERE a.visit_date >= '2026-07-06' AND a.visit_date <= '2026-07-19'
-    GROUP BY 1, 2, 3, 4, 5, 6, 7
+    GROUP BY 1, 2, 3, 4, 5, 6
 ),
 
 ----------------------------------------------------------------------
@@ -253,7 +253,7 @@ cte_sales_daily AS (
 -- 7. MASTER OUTLET
 ----------------------------------------------------------------------
 cte_master_outlet AS (
-    SELECT DISTINCT ON (source_schema, distributor_id, cust_id)
+    SELECT DISTINCT ON (distributor_id, cust_id)
         source_schema,
         distributor_id,
         cust_id AS outlet_id,
@@ -265,15 +265,14 @@ cte_master_outlet AS (
         gsalesforce1_id AS gsalesforce_id,
         gsalesforce1_nm AS gsalesforce_nm
     FROM {{ ref('silver_oa_performance') }}
-    ORDER BY source_schema, distributor_id, cust_id, tahun DESC, periode DESC
+    ORDER BY distributor_id, cust_id, tahun DESC, periode DESC
 ),
 
 ----------------------------------------------------------------------
--- 8. TARGET NMRC HARIAN
+-- 8. TARGET NMRC HARIAN (TANPA KOLOM source_schema DI BRONZE)
 ----------------------------------------------------------------------
 cte_nmrc_daily AS (
     SELECT 
-        n.source_schema::varchar AS source_schema,
         COALESCE(ms.gdiv_id, 'UNKNOWN_GDIV') AS gdiv_id,
         n.distributor_id::varchar AS distributor_id,
         n.sls_id::varchar AS sls_id,
@@ -284,15 +283,14 @@ cte_nmrc_daily AS (
         MAX(n.ec_kpl::numeric) AS ec_kpl
     FROM bift.bronze_nmrc_subdetail n
     LEFT JOIN cte_master_salesman ms
-        ON COALESCE(n.source_schema::varchar, '') = COALESCE(ms.source_schema::varchar, '')
-       AND n.distributor_id::varchar              = ms.distributor_id::varchar
-       AND n.sls_id::varchar                      = ms.sls_id::varchar
+        ON n.distributor_id::varchar = ms.distributor_id::varchar
+       AND n.sls_id::varchar         = ms.sls_id::varchar
     WHERE n.tahun::integer = 2026 AND n.periode::integer = 7 AND n.week::integer IN (28, 29)
-    GROUP BY 1, 2, 3, 4, 5
+    GROUP BY 1, 2, 3, 4
 )
 
 ----------------------------------------------------------------------
--- MAIN SELECT
+-- MAIN SELECT (TERKUNCI GDIV_ID)
 ----------------------------------------------------------------------
 SELECT 
     b.tahun AS year,
@@ -380,23 +378,20 @@ SELECT
 
 FROM cte_unique_activity b
 
--- 1. JOIN MASTER OUTLET
+-- 1. JOIN MASTER OUTLET (MURNI DIST + OUTLET)
 LEFT JOIN cte_master_outlet mo
-    ON b.source_schema  = mo.source_schema
-   AND b.distributor_id = mo.distributor_id
+    ON b.distributor_id = mo.distributor_id
    AND b.outlet_id      = mo.outlet_id
 
--- 2. JOIN MASTER SALESMAN
+-- 2. JOIN MASTER SALESMAN (TERKUNCI GDIV + DIST + SLS)
 LEFT JOIN cte_master_salesman ms
-    ON b.source_schema  = ms.source_schema
-   AND b.gdiv_id        = ms.gdiv_id
+    ON b.gdiv_id        = ms.gdiv_id
    AND b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES
+-- 3. JOIN TRANSAKSI SALES (TERKUNCI GDIV + DIST + SLS + OUTLET + PCODE + TGL)
 LEFT JOIN cte_sales_daily sal
-    ON b.source_schema   = sal.source_schema
-   AND b.gdiv_id         = sal.gdiv_id
+    ON b.gdiv_id         = sal.gdiv_id
    AND b.distributor_id  = sal.distributor_id
    AND b.sls_id          = sal.sls_id
    AND b.outlet_id       = sal.outlet_id
@@ -407,29 +402,26 @@ LEFT JOIN cte_sales_daily sal
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO
+-- 5. JOIN GRADE TOKO (TERKUNCI GDIV + DIST + SLS + OUTLET + TGL)
 LEFT JOIN cte_grading_daily gst
-    ON b.source_schema   = gst.source_schema
-   AND b.gdiv_id         = gst.gdiv_id
+    ON b.gdiv_id         = gst.gdiv_id
    AND b.distributor_id  = gst.distributor_id
    AND b.sls_id          = gst.sls_id
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
--- 6. JOIN IR DISPLAY
+-- 6. JOIN IR DISPLAY (TERKUNCI GDIV + DIST + SLS + OUTLET + PCODE + TGL)
 LEFT JOIN cte_ir_daily ir
-    ON b.source_schema   = ir.source_schema
-   AND b.gdiv_id         = ir.gdiv_id
+    ON b.gdiv_id         = ir.gdiv_id
    AND b.distributor_id  = ir.distributor_id
    AND b.sls_id          = ir.sls_id
    AND b.outlet_id       = ir.outlet_id
    AND b.pcode           = ir.pcode
    AND b.activity_date   = ir.visit_date
 
--- 7. JOIN TARGET NMRC
+-- 7. JOIN TARGET NMRC (TERKUNCI GDIV + DIST + SLS + TGL)
 LEFT JOIN cte_nmrc_daily nm
-    ON b.source_schema   = nm.source_schema
-   AND b.gdiv_id         = nm.gdiv_id
+    ON b.gdiv_id         = nm.gdiv_id
    AND b.distributor_id  = nm.distributor_id
    AND b.sls_id          = nm.sls_id
    AND b.activity_date   = nm.report_date
