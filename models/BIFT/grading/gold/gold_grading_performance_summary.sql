@@ -274,6 +274,8 @@ cte_nmrc_daily AS (
 -- MAIN SELECT
 ----------------------------------------------------------------------
 SELECT 
+    b.source_schema,          -- 👈 SANGAT KRUSIAL: Kolom ini yang dicari index!
+    b.gdiv_id,
     b.tahun AS year,
     b.periode AS period,
     b.week,
