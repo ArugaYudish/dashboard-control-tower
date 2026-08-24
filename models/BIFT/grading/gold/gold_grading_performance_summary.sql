@@ -18,7 +18,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (fmaster + dim_mapping_subbrand)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
@@ -38,7 +38,7 @@ cte_product_gdiv AS (
 ),
 
 ----------------------------------------------------------------------
--- 1. MASTER SALESMAN HIERARKI (DARI BRONZE SALESMAN HIERARCHY)
+-- 1. MASTER SALESMAN HIERARKI
 ----------------------------------------------------------------------
 cte_master_salesman AS (
     SELECT DISTINCT ON (distributor_id, sls_id)
@@ -64,7 +64,7 @@ cte_master_salesman AS (
 ),
 
 ----------------------------------------------------------------------
--- 2. MASTER OUTLET (DARI SILVER OA PERIODE 7)
+-- 2. MASTER OUTLET
 ----------------------------------------------------------------------
 cte_master_outlet AS (
     SELECT DISTINCT ON (distributor_id, cust_id)
@@ -87,7 +87,7 @@ cte_master_outlet AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. BACKBONE KEGIATAN HARIAN (TRIAL 13-14 JULI 2026)
+-- 3. BACKBONE KEGIATAN HARIAN
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
@@ -179,7 +179,7 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI GRADING HARIAN (PRIORITAS GRADE TERBAIK: A > B > C > D)
+-- 5. AGREGASI GRADING HARIAN
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
@@ -206,7 +206,7 @@ cte_grading_daily AS (
 ),
 
 ----------------------------------------------------------------------
--- 6. AGREGASI IR DISPLAY
+-- 6. AGREGASI IR DISPLAY (PER PRODUK & PER TOKO)
 ----------------------------------------------------------------------
 cte_ir_daily AS (
     SELECT 
@@ -241,9 +241,15 @@ cte_ir_daily AS (
     WHERE a.visit_date >= '2026-07-13' AND a.visit_date <= '2026-07-14'
     GROUP BY 1, 2, 3, 4, 5
 ),
+cte_ir_outlet_flag AS (
+    -- Flag apakah toko dikunjungi foto IR di hari itu (Level Outlet)
+    SELECT DISTINCT distributor_id::varchar AS distributor_id, outlet_id::varchar AS outlet_id, visit_date::date AS visit_date
+    FROM bift.bronze_rcall_avis_d
+    WHERE visit_date >= '2026-07-13' AND visit_date <= '2026-07-14'
+),
 
 ----------------------------------------------------------------------
--- 7. AGREGASI TRANSAKSI SALES SFA
+-- 7. AGREGASI TRANSAKSI SALES SFA (PER PRODUK & PER TOKO)
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
@@ -267,6 +273,14 @@ cte_sales_daily AS (
     WHERE is_transaction = 1
       AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
     GROUP BY 1, 2, 3, 4, 5
+),
+cte_sales_outlet_flag AS (
+    -- Flag apakah toko belanja riil > 0 di hari itu (Level Outlet)
+    SELECT distributor_id::varchar AS distributor_id, cust_id::varchar AS outlet_id, COALESCE(inv_date, date) AS sales_date
+    FROM {{ ref('silver_oa_performance') }}
+    WHERE is_transaction = 1 AND inv_qty > 0
+      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
+    GROUP BY 1, 2, 3
 ),
 
 ----------------------------------------------------------------------
@@ -354,15 +368,15 @@ SELECT
     COALESCE(nm.rcall_kpl, 0) AS rcall_kpl_nmrc,
     COALESCE(nm.ec_kpl, 0) AS ec_kpl_nmrc,
     
-    -- TRANSAKSI & DETEKSI IR
+    -- TRANSAKSI & DETEKSI IR (PER PRODUK)
     COALESCE(ir.is_ir_detected, 0) AS is_ir_detected,
     COALESCE(sal.total_inv_qty, 0) AS inv_qty,
     COALESCE(sal.total_inv_val, 0) AS inv_val,
     
-    -- EFFECTIVE CALL (EC) INDICATORS
+    -- EFFECTIVE CALL (EC) INDICATORS (LEVEL TOKO / OUTLET RIIL)
     CASE WHEN COALESCE(sal.total_inv_qty, 0) > 0 THEN 1 ELSE 0 END AS is_ec_transaction,
     CASE WHEN COALESCE(ir.is_ir_detected, 0) = 1 THEN 1 ELSE 0 END AS is_ec_display,
-    CASE WHEN (COALESCE(sal.total_inv_qty, 0) > 0 AND COALESCE(ir.is_ir_detected, 0) = 1) THEN 1 ELSE 0 END AS is_ec_avis,
+    CASE WHEN (sof.outlet_id IS NOT NULL AND iof.outlet_id IS NOT NULL) THEN 1 ELSE 0 END AS is_ec_avis,
     
     -- ANOMALY STATUS
     CASE 
@@ -382,12 +396,12 @@ LEFT JOIN cte_master_outlet mo
     ON b.distributor_id = mo.distributor_id
    AND b.outlet_id      = mo.outlet_id
 
--- 2. JOIN MASTER SALESMAN (DISTRIBUTOR + SLS)
+-- 2. JOIN MASTER SALESMAN
 LEFT JOIN cte_master_salesman ms
     ON b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES (GRAIN PRESISI: DIST + SLS + OUTLET + PCODE + DATE)
+-- 3. JOIN TRANSAKSI SALES
 LEFT JOIN cte_sales_daily sal
     ON b.distributor_id  = sal.distributor_id
    AND b.sls_id          = sal.sls_id
@@ -399,7 +413,7 @@ LEFT JOIN cte_sales_daily sal
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO (GRAIN PRESISI OUTLET + TANGGAL AUDIT)
+-- 5. JOIN GRADE TOKO
 LEFT JOIN cte_grading_daily gst
     ON b.distributor_id  = gst.distributor_id
    AND b.outlet_id       = gst.outlet_id
@@ -413,7 +427,17 @@ LEFT JOIN cte_ir_daily ir
    AND b.pcode           = ir.pcode
    AND b.activity_date   = ir.visit_date
 
--- 7. JOIN TARGET NMRC
+-- 7. JOIN LEVEL-OUTLET FLAGS UNTUK EC AVIS
+LEFT JOIN cte_sales_outlet_flag sof
+    ON b.distributor_id  = sof.distributor_id
+   AND b.outlet_id       = sof.outlet_id
+   AND b.activity_date   = sof.sales_date
+LEFT JOIN cte_ir_outlet_flag iof
+    ON b.distributor_id  = iof.distributor_id
+   AND b.outlet_id       = iof.outlet_id
+   AND b.activity_date   = iof.visit_date
+
+-- 8. JOIN TARGET NMRC
 LEFT JOIN cte_nmrc_daily nm
     ON b.distributor_id  = nm.distributor_id
    AND b.sls_id          = nm.sls_id
