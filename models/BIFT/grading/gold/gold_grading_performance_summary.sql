@@ -87,7 +87,7 @@ cte_master_outlet AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. BACKBONE KEGIATAN HARIAN (TRIAL 13-14 JULI 2026)
+-- 3. BACKBONE KEGIATAN HARIAN (LENGKAP: TRANSAKSI + IR + GRADING + CB)
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
@@ -125,7 +125,24 @@ cte_backbone AS (
 
     UNION ALL
 
-    -- Sumber 3: Toko CB Pasif (Master Bulanan)
+    -- Sumber 3: Kunjungan Audit Grading Toko (AGAR TOKO AUDIT TIDAK HILANG!)
+    SELECT 
+        COALESCE(g.source_schema::varchar, 'spx') AS source_schema,
+        'UNKNOWN_GDIV'::varchar                   AS gdiv_id,
+        g.distributor_id::varchar                 AS distributor_id,
+        g.sls_id::varchar                         AS sls_id,
+        g.outlet_id::varchar                      AS outlet_id,
+        NULL::varchar                             AS pcode,
+        g.visit_date::date                        AS activity_date,
+        2026::numeric                             AS tahun,
+        7::numeric                                AS periode,
+        28::numeric                               AS week
+    FROM bift.bronze_grading_ir g
+    WHERE g.visit_date >= '2026-07-13' AND g.visit_date <= '2026-07-14'
+
+    UNION ALL
+
+    -- Sumber 4: Toko CB Pasif (Master Bulanan)
     SELECT 
         source_schema::varchar      AS source_schema,
         gdiv_id::varchar            AS gdiv_id,
@@ -143,7 +160,7 @@ cte_backbone AS (
 ),
 
 ----------------------------------------------------------------------
--- 4. DEDUP BACKBONE (GRAIN MURNI TINGKAT BISNIS: ANTI DUPLIKASI)
+-- 4. DEDUP BACKBONE
 ----------------------------------------------------------------------
 cte_unique_activity AS (
     SELECT 
@@ -162,12 +179,11 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI GRADING HARIAN
+-- 5. AGREGASI GRADING HARIAN (PERFECT GRAIN TOKO + TANGGAL)
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
-        g.sls_id::varchar AS sls_id,
         g.outlet_id::varchar AS outlet_id,
         g.visit_date::date AS visit_date,
         MAX(COALESCE(b.grade::varchar, g.grade::varchar)) AS final_grade,
@@ -180,7 +196,7 @@ cte_grading_daily AS (
        AND g.kode_ap::varchar        = b.kode_ap::varchar
        AND g.visit_date::date        = b.visit_date::date
     WHERE g.visit_date >= '2026-07-13' AND g.visit_date <= '2026-07-14'
-    GROUP BY 1, 2, 3, 4
+    GROUP BY 1, 2, 3
 ),
 
 ----------------------------------------------------------------------
@@ -265,7 +281,7 @@ cte_nmrc_daily AS (
 )
 
 ----------------------------------------------------------------------
--- MAIN SELECT (1:1 RELASI SEMPURNA)
+-- MAIN SELECT
 ----------------------------------------------------------------------
 SELECT 
     COALESCE(sal.source_schema, ms.source_schema, mo.source_schema, b.source_schema) AS source_schema,
@@ -377,10 +393,9 @@ LEFT JOIN cte_sales_daily sal
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO
+-- 5. JOIN GRADE TOKO (GRAIN PRESISI OUTLET + TANGGAL AUDIT)
 LEFT JOIN cte_grading_daily gst
     ON b.distributor_id  = gst.distributor_id
-   AND b.sls_id          = gst.sls_id
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
