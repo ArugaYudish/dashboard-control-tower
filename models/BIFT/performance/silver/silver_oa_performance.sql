@@ -119,12 +119,17 @@ trx AS (
         f.cat_nm,
         f.sbu_id,
         f.sbu_nm
-    FROM spx.vfsales_det vd
+    FROM (
+        SELECT *
+        FROM spx.vfsales_det
+        WHERE week_no = 28  
+        UNION ALL
+        SELECT *
+        FROM spx.vfsales_det
+        WHERE week_no = 29
+    ) vd
     LEFT JOIN bift.dim_product f 
         ON vd.pcode = f.pcode
-    WHERE vd.ord_date >= '2026-07-06' AND vd.ord_date <= '2026-07-19'
-      AND vd.prd_no IN ('7', '07')
-      AND vd.week_no IN ('28', '29', '028', '029')
 ),
 
 -- ---------------------------------------------------------------------------
