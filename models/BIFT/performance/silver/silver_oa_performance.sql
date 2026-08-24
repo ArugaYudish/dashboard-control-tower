@@ -120,13 +120,12 @@ trx AS (
         f.sbu_id,
         f.sbu_nm
     FROM (
+        {% for w in range(28, 35) %}
         SELECT *
         FROM spx.vfsales_det
-        WHERE week_no = 28  
-        UNION ALL
-        SELECT *
-        FROM spx.vfsales_det
-        WHERE week_no = 29
+        WHERE week_no = {{ w }}
+        {% if not loop.last %}UNION ALL{% endif %}
+        {% endfor %}
     ) vd
     LEFT JOIN bift.dim_product f 
         ON vd.pcode = f.pcode
