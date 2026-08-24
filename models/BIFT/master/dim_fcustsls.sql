@@ -1,6 +1,15 @@
 {{
     config(
-        materialized='ephemeral'
+        schema='bift',
+        materialized='incremental',
+        alias='dim_fcustsls',
+        unique_key=['source_schema', 'distributor_id', 'cust_id', 'sls_id', 'tahun', 'periode'],
+        incremental_strategy='delete+insert',
+        indexes=[
+            {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
+            {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
+            {'columns': ['source_schema', 'distributor_id', 'cust_id'], 'type': 'btree'}
+        ]
     )
 }}
 
@@ -17,6 +26,21 @@ WITH m1_staging AS (
         FROM raw_ficom_m1.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    {% if is_incremental() %}
+      {% if var('periode', none) is not none and var('tahun', none) is not none %}
+        WHERE f.periode = {{ var('periode') }}
+          AND f.tahun = {{ var('tahun') }}
+      {% else %}
+        WHERE (f.tahun, f.periode) IN (
+            SELECT DISTINCT tahun, periode
+            FROM raw_ficom_m1.v_fcustsls_staging
+            WHERE _airbyte_extracted_at > (
+                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
+                FROM {{ this }}
+            )
+        )
+      {% endif %}
+    {% endif %}
 ),
 
 m2_staging AS (
@@ -32,6 +56,21 @@ m2_staging AS (
         FROM raw_ficom_m2.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    {% if is_incremental() %}
+      {% if var('periode', none) is not none and var('tahun', none) is not none %}
+        WHERE f.periode = {{ var('periode') }}
+          AND f.tahun = {{ var('tahun') }}
+      {% else %}
+        WHERE (f.tahun, f.periode) IN (
+            SELECT DISTINCT tahun, periode
+            FROM raw_ficom_m2.v_fcustsls_staging
+            WHERE _airbyte_extracted_at > (
+                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
+                FROM {{ this }}
+            )
+        )
+      {% endif %}
+    {% endif %}
 ),
 
 m3_staging AS (
@@ -47,6 +86,21 @@ m3_staging AS (
         FROM raw_ficom_m3.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    {% if is_incremental() %}
+      {% if var('periode', none) is not none and var('tahun', none) is not none %}
+        WHERE f.periode = {{ var('periode') }}
+          AND f.tahun = {{ var('tahun') }}
+      {% else %}
+        WHERE (f.tahun, f.periode) IN (
+            SELECT DISTINCT tahun, periode
+            FROM raw_ficom_m3.v_fcustsls_staging
+            WHERE _airbyte_extracted_at > (
+                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
+                FROM {{ this }}
+            )
+        )
+      {% endif %}
+    {% endif %}
 ),
 
 combined_staging AS (
@@ -64,9 +118,7 @@ staging_with_max_date AS (
             PARTITION BY source_schema, distributor_id, tahun, periode
         ) AS upd_date_terakhir
     FROM combined_staging
-    WHERE flag_aktif = 'Y'
-      AND salesforce_id NOT IN ('999', '116', '213', '222')
-      AND cust_id IS NOT NULL 
+    WHERE cust_id IS NOT NULL 
       AND distributor_id IS NOT NULL
       AND tahun IS NOT NULL
       AND periode IS NOT NULL
@@ -112,14 +164,16 @@ SELECT
     group_outlet,
     salesforce_id,
     team_id,
-    hrabu,
     nobrs,
     route,
-    hjumat,
-    hkamis,
-    hsabtu,
-    hsenin,
     slimit,
+    hsenin,
+    hselasa,
+    hrabu,
+    hkamis,
+    hjumat,
+    hsabtu,
+    hminggu,
     visit1,
     visit2,
     visit3,
@@ -132,7 +186,5 @@ SELECT
         WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TYTT' THEN 'Monthly2'
         WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TTYT' THEN 'Monthly3'
         WHEN CONCAT(visit1, visit2, visit3, visit4) = 'TTTY' THEN 'Monthly4'
-    END                                                     AS cycle_kunjungan,
-    hminggu,
-    hselasa
+    END                                                     AS cycle_kunjungan
 FROM latest_staging_per_period
