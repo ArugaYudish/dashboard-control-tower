@@ -87,7 +87,7 @@ cte_master_outlet AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. BACKBONE KEGIATAN HARIAN (LENGKAP: TRANSAKSI + IR + GRADING + CB)
+-- 3. BACKBONE KEGIATAN HARIAN (TRIAL 13-14 JULI 2026)
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
@@ -125,7 +125,7 @@ cte_backbone AS (
 
     UNION ALL
 
-    -- Sumber 3: Kunjungan Audit Grading Toko (AGAR TOKO AUDIT TIDAK HILANG!)
+    -- Sumber 3: Kunjungan Audit Grading Toko
     SELECT 
         COALESCE(g.source_schema::varchar, 'spx') AS source_schema,
         'UNKNOWN_GDIV'::varchar                   AS gdiv_id,
@@ -179,14 +179,20 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI GRADING HARIAN (PERFECT GRAIN TOKO + TANGGAL)
+-- 5. AGREGASI GRADING HARIAN (PRIORITAS GRADE TERBAIK: A > B > C > D)
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
         g.distributor_id::varchar AS distributor_id,
-        g.outlet_id::varchar AS outlet_id,
-        g.visit_date::date AS visit_date,
-        MAX(COALESCE(b.grade::varchar, g.grade::varchar)) AS final_grade,
+        g.outlet_id::varchar      AS outlet_id,
+        g.visit_date::date        AS visit_date,
+        CASE 
+            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'A') THEN 'A'
+            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'B') THEN 'B'
+            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'C') THEN 'C'
+            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'D') THEN 'D'
+            ELSE MIN(COALESCE(b.grade::varchar, g.grade::varchar))
+        END AS final_grade,
         MAX(COALESCE(b.kode_ap::varchar, g.kode_ap::varchar)) AS kode_ap
     FROM bift.bronze_grading_ir g
     LEFT JOIN bift.bronze_grading_banding b
@@ -205,22 +211,22 @@ cte_grading_daily AS (
 cte_ir_daily AS (
     SELECT 
         a.distributor_id::varchar AS distributor_id,
-        a.sls_id::varchar AS sls_id,
-        a.outlet_id::varchar AS outlet_id,
-        a.pcode::varchar AS pcode,
-        a.visit_date::date AS visit_date,
-        MAX(a.kode_ap::varchar) AS kode_ap,
+        a.sls_id::varchar         AS sls_id,
+        a.outlet_id::varchar      AS outlet_id,
+        a.pcode::varchar          AS pcode,
+        a.visit_date::date        AS visit_date,
+        MAX(a.kode_ap::varchar)   AS kode_ap,
         SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_ir_detected
     FROM bift.bronze_rcall_avis_d a
     LEFT JOIN (
         SELECT 
             distributor_id::varchar AS distributor_id, 
-            outlet_id::varchar AS outlet_id,
-            sls_id::varchar AS sls_id, 
-            kode_ap::varchar AS kode_ap, 
-            pcode::varchar AS pcode, 
-            visit_date::date AS visit_date,
+            outlet_id::varchar      AS outlet_id,
+            sls_id::varchar         AS sls_id, 
+            kode_ap::varchar        AS kode_ap, 
+            pcode::varchar          AS pcode, 
+            visit_date::date        AS visit_date,
             MAX(count_facing::integer) AS count_facing
         FROM bift.bronze_rcall_avis_manual
         WHERE visit_date >= '2026-07-13' AND visit_date <= '2026-07-14'
