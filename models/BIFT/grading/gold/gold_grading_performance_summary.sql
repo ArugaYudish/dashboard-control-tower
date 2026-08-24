@@ -18,31 +18,35 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (CONCAT: prlin + brand + sbra1)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (OPTIMIZED JOIN)
 ----------------------------------------------------------------------
+cte_fmaster_clean AS (
+    SELECT 
+        pcode::varchar AS pcode,
+        pcodename::varchar AS pcode_nm,
+        (COALESCE(prlin::varchar, '') || COALESCE(brand::varchar, '') || COALESCE(sbra1::varchar, '')) AS subbrand_id
+    FROM raw_ho.fmaster
+),
+
 cte_product_gdiv AS (
-    SELECT DISTINCT
-        p.pcode::varchar            AS pcode,
-        p.pcodename::varchar        AS pcode_nm,
-        mms.subbrand_id::varchar    AS subbrand_id,
-        mms.subbrand_nm::varchar    AS subbrand_nm,
-        mms.cat_id::varchar         AS cat_id,
-        mms.cat_nm::varchar         AS cat_nm,
-        mms.gdiv_id::varchar        AS gdiv_id,
-        mms.gdiv_nm::varchar        AS gdiv_nm,
-        mms.div_id::varchar         AS div_id,
-        mms.div_nm::varchar         AS div_nm
-    FROM raw_ho.fmaster p
+    SELECT 
+        p.pcode,
+        p.pcode_nm,
+        mms.subbrand_id::varchar AS subbrand_id,
+        mms.subbrand_nm::varchar AS subbrand_nm,
+        mms.cat_id::varchar      AS cat_id,
+        mms.cat_nm::varchar      AS cat_nm,
+        mms.gdiv_id::varchar     AS gdiv_id,
+        mms.gdiv_nm::varchar     AS gdiv_nm,
+        mms.div_id::varchar      AS div_id,
+        mms.div_nm::varchar      AS div_nm
+    FROM cte_fmaster_clean p
     LEFT JOIN bift.dim_mapping_subbrand mms 
-        ON CONCAT(
-            COALESCE(p.prlin::varchar, ''), 
-            COALESCE(p.brand::varchar, ''), 
-            COALESCE(p.sbra1::varchar, '')
-        ) = mms.subbrand_id::varchar
+        ON p.subbrand_id = mms.subbrand_id::varchar
 ),
 
 ----------------------------------------------------------------------
--- 1. MASTER SALESMAN HIERARKI (DARI SILVER OA)
+-- 1. MASTER SALESMAN HIERARKI (DIBATASI PERIODE 7 SAJA)
 ----------------------------------------------------------------------
 cte_master_salesman AS (
     SELECT DISTINCT ON (gdiv_id, distributor_id, sls_id)
@@ -59,11 +63,32 @@ cte_master_salesman AS (
         rsm_id, rsm_nm,
         ss_id, ss_nm
     FROM {{ ref('silver_oa_performance') }}
-    ORDER BY gdiv_id, distributor_id, sls_id, tahun DESC, periode DESC
+    WHERE tahun = 2026 AND periode = 7
+    ORDER BY gdiv_id, distributor_id, sls_id
 ),
 
 ----------------------------------------------------------------------
--- 2. BACKBONE KEGIATAN HARIAN (KHUSUS PERIODE 7 WEEK 28 & 29)
+-- 2. MASTER OUTLET (DIBATASI PERIODE 7 SAJA)
+----------------------------------------------------------------------
+cte_master_outlet AS (
+    SELECT DISTINCT ON (distributor_id, cust_id)
+        source_schema,
+        distributor_id,
+        cust_id AS outlet_id,
+        cust_nm,
+        kabupaten_name AS city,
+        channel_id, channel_nm,
+        group_channel_id, group_channel_nm,
+        salesforce_id, salesforce_nm,
+        gsalesforce1_id AS gsalesforce_id,
+        gsalesforce1_nm AS gsalesforce_nm
+    FROM {{ ref('silver_oa_performance') }}
+    WHERE tahun = 2026 AND periode = 7
+    ORDER BY distributor_id, cust_id
+),
+
+----------------------------------------------------------------------
+-- 3. BACKBONE KEGIATAN HARIAN (KHUSUS PERIODE 7 WEEK 28 & 29)
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
@@ -93,8 +118,8 @@ cte_backbone AS (
         a.outlet_id::varchar AS outlet_id,
         a.pcode::varchar AS pcode,
         a.visit_date::date AS activity_date,
-        c.year AS tahun,
-        c.period AS periode,
+        2026 AS tahun,
+        7 AS periode,
         c.week AS week
     FROM bift.bronze_rcall_avis_d a
     INNER JOIN spx.m_cycle3 c 
@@ -109,7 +134,7 @@ cte_backbone AS (
 
     UNION
 
-    -- Sumber 3: Toko CB Pasif (Master Bulanan)
+    -- Sumber 3: Toko CB Pasif
     SELECT 
         source_schema,
         gdiv_id,
@@ -127,7 +152,7 @@ cte_backbone AS (
 ),
 
 ----------------------------------------------------------------------
--- 3. DEDUP BACKBONE
+-- 4. DEDUP BACKBONE
 ----------------------------------------------------------------------
 cte_unique_activity AS (
     SELECT 
@@ -146,7 +171,7 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 4. AGREGASI GRADING HARIAN (TANPA KOLOM source_schema DI BRONZE)
+-- 5. AGREGASI GRADING HARIAN
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
@@ -158,9 +183,6 @@ cte_grading_daily AS (
         MAX(COALESCE(b.grade, g.grade)) AS final_grade,
         MAX(COALESCE(b.kode_ap::varchar, g.kode_ap::varchar)) AS kode_ap
     FROM bift.bronze_grading_ir g
-    INNER JOIN spx.m_cycle3 c 
-        ON g.visit_date::date = c.cdate::date
-       AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
     LEFT JOIN cte_master_salesman ms
         ON g.distributor_id::varchar = ms.distributor_id::varchar
        AND g.sls_id::varchar         = ms.sls_id::varchar
@@ -169,15 +191,13 @@ cte_grading_daily AS (
        AND g.outlet_id::varchar                   = b.outlet_id::varchar
        AND g.sls_id::varchar                      = b.sls_id::varchar
        AND g.kode_ap::varchar                     = b.kode_ap::varchar
-       AND COALESCE(g.team_id::varchar, '')       = COALESCE(b.team_id::varchar, '')
-       AND COALESCE(g.salesforce_id::varchar, '') = COALESCE(b.salesforce_id::varchar, '')
        AND g.visit_date::date                     = b.visit_date::date
     WHERE g.visit_date >= '2026-07-06' AND g.visit_date <= '2026-07-19'
     GROUP BY 1, 2, 3, 4, 5
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI IR DISPLAY (TANPA KOLOM source_schema DI BRONZE)
+-- 6. AGREGASI IR DISPLAY
 ----------------------------------------------------------------------
 cte_ir_daily AS (
     SELECT 
@@ -191,10 +211,7 @@ cte_ir_daily AS (
         SUM(COALESCE(m.count_facing, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_ir_detected
     FROM bift.bronze_rcall_avis_d a
-    INNER JOIN spx.m_cycle3 c 
-        ON a.visit_date::date = c.cdate::date
-       AND c.year = 2026 AND c.period = 7 AND c.week IN (28, 29)
-    LEFT JOIN cte_product_gdiv pg
+    LEFT JOIN cte_product_gdiv pg 
         ON a.pcode::varchar = pg.pcode
     LEFT JOIN cte_master_salesman ms
         ON a.distributor_id::varchar = ms.distributor_id::varchar
@@ -223,7 +240,7 @@ cte_ir_daily AS (
 ),
 
 ----------------------------------------------------------------------
--- 6. AGREGASI TRANSAKSI SALES SFA
+-- 7. AGREGASI TRANSAKSI SALES SFA
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
@@ -250,26 +267,7 @@ cte_sales_daily AS (
 ),
 
 ----------------------------------------------------------------------
--- 7. MASTER OUTLET
-----------------------------------------------------------------------
-cte_master_outlet AS (
-    SELECT DISTINCT ON (distributor_id, cust_id)
-        source_schema,
-        distributor_id,
-        cust_id AS outlet_id,
-        cust_nm,
-        kabupaten_name AS city,
-        channel_id, channel_nm,
-        group_channel_id, group_channel_nm,
-        salesforce_id, salesforce_nm,
-        gsalesforce1_id AS gsalesforce_id,
-        gsalesforce1_nm AS gsalesforce_nm
-    FROM {{ ref('silver_oa_performance') }}
-    ORDER BY distributor_id, cust_id, tahun DESC, periode DESC
-),
-
-----------------------------------------------------------------------
--- 8. TARGET NMRC HARIAN (TANPA KOLOM source_schema DI BRONZE)
+-- 8. TARGET NMRC HARIAN
 ----------------------------------------------------------------------
 cte_nmrc_daily AS (
     SELECT 
@@ -285,12 +283,12 @@ cte_nmrc_daily AS (
     LEFT JOIN cte_master_salesman ms
         ON n.distributor_id::varchar = ms.distributor_id::varchar
        AND n.sls_id::varchar         = ms.sls_id::varchar
-    WHERE n.tahun::integer = 2026 AND n.periode::integer = 7 AND n.week::integer IN (28, 29)
+    WHERE n.tgl >= '2026-07-06' AND n.tgl <= '2026-07-19'
     GROUP BY 1, 2, 3, 4
 )
 
 ----------------------------------------------------------------------
--- MAIN SELECT (TERKUNCI GDIV_ID)
+-- MAIN SELECT
 ----------------------------------------------------------------------
 SELECT 
     b.tahun AS year,
@@ -378,18 +376,18 @@ SELECT
 
 FROM cte_unique_activity b
 
--- 1. JOIN MASTER OUTLET (MURNI DIST + OUTLET)
+-- 1. JOIN MASTER OUTLET
 LEFT JOIN cte_master_outlet mo
     ON b.distributor_id = mo.distributor_id
    AND b.outlet_id      = mo.outlet_id
 
--- 2. JOIN MASTER SALESMAN (TERKUNCI GDIV + DIST + SLS)
+-- 2. JOIN MASTER SALESMAN
 LEFT JOIN cte_master_salesman ms
     ON b.gdiv_id        = ms.gdiv_id
    AND b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES (TERKUNCI GDIV + DIST + SLS + OUTLET + PCODE + TGL)
+-- 3. JOIN TRANSAKSI SALES
 LEFT JOIN cte_sales_daily sal
     ON b.gdiv_id         = sal.gdiv_id
    AND b.distributor_id  = sal.distributor_id
@@ -402,7 +400,7 @@ LEFT JOIN cte_sales_daily sal
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO (TERKUNCI GDIV + DIST + SLS + OUTLET + TGL)
+-- 5. JOIN GRADE TOKO
 LEFT JOIN cte_grading_daily gst
     ON b.gdiv_id         = gst.gdiv_id
    AND b.distributor_id  = gst.distributor_id
@@ -410,7 +408,7 @@ LEFT JOIN cte_grading_daily gst
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
--- 6. JOIN IR DISPLAY (TERKUNCI GDIV + DIST + SLS + OUTLET + PCODE + TGL)
+-- 6. JOIN IR DISPLAY
 LEFT JOIN cte_ir_daily ir
     ON b.gdiv_id         = ir.gdiv_id
    AND b.distributor_id  = ir.distributor_id
@@ -419,7 +417,7 @@ LEFT JOIN cte_ir_daily ir
    AND b.pcode           = ir.pcode
    AND b.activity_date   = ir.visit_date
 
--- 7. JOIN TARGET NMRC (TERKUNCI GDIV + DIST + SLS + TGL)
+-- 7. JOIN TARGET NMRC
 LEFT JOIN cte_nmrc_daily nm
     ON b.gdiv_id         = nm.gdiv_id
    AND b.distributor_id  = nm.distributor_id
