@@ -18,7 +18,7 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND (raw_ho.fmaster + dim_mapping_subbrand)
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (fmaster + dim_mapping_subbrand)
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
@@ -66,7 +66,7 @@ cte_master_salesman AS (
 -- 2. MASTER OUTLET (DARI SILVER OA PERIODE 7)
 ----------------------------------------------------------------------
 cte_master_outlet AS (
-    SELECT DISTINCT ON (distributor_id, cust_id)
+    SELECT DISTINCT ON (source_schema, distributor_id, cust_id)
         source_schema::varchar      AS source_schema,
         distributor_id::varchar     AS distributor_id,
         cust_id::varchar            AS outlet_id,
@@ -82,7 +82,7 @@ cte_master_outlet AS (
         gsalesforce1_nm::varchar    AS gsalesforce_nm
     FROM {{ ref('silver_oa_performance') }}
     WHERE tahun = 2026 AND periode = 7 AND is_transaction = 0
-    ORDER BY distributor_id, cust_id
+    ORDER BY source_schema, distributor_id, cust_id
 ),
 
 ----------------------------------------------------------------------
@@ -97,13 +97,13 @@ cte_backbone AS (
         sls_id::varchar             AS sls_id,
         cust_id::varchar            AS outlet_id,
         pcode::varchar              AS pcode,
-        COALESCE(date, inv_date)    AS activity_date,
+        COALESCE(inv_date, date)    AS activity_date,
         tahun::numeric              AS tahun,
         periode::numeric            AS periode,
         week::numeric               AS week
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND COALESCE(date, inv_date) >= '2026-07-13' AND COALESCE(date, inv_date) <= '2026-07-14'
+      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
 
     UNION
 
@@ -226,29 +226,29 @@ cte_ir_daily AS (
 ),
 
 ----------------------------------------------------------------------
--- 7. AGREGASI TRANSAKSI SALES SFA
+-- 7. AGREGASI TRANSAKSI SALES SFA (DIPERBAIKI: GRAIN TANGGAL & SCHEMA)
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
-        source_schema::varchar AS source_schema,
-        gdiv_id::varchar AS gdiv_id,
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        cust_id::varchar AS outlet_id,
-        pcode::varchar AS pcode,
-        COALESCE(date, inv_date) AS sales_date,
-        MAX(pcode_nm::varchar) AS pcode_nm,
-        MAX(subbrand_id::varchar) AS subbrand_id,
-        MAX(subbrand_nm::varchar) AS subbrand_nm,
-        MAX(cat_id::varchar) AS cat_id,
-        MAX(cat_nm::varchar) AS cat_nm,
-        MAX(div_id::varchar) AS div_id,
-        MAX(div_nm::varchar) AS div_nm,
-        SUM(inv_qty) AS total_inv_qty,
-        SUM(inv_val) AS total_inv_val
+        source_schema::varchar      AS source_schema,
+        gdiv_id::varchar            AS gdiv_id,
+        distributor_id::varchar     AS distributor_id,
+        sls_id::varchar             AS sls_id,
+        cust_id::varchar            AS outlet_id,
+        pcode::varchar              AS pcode,
+        COALESCE(inv_date, date)    AS sales_date,
+        MAX(pcode_nm::varchar)      AS pcode_nm,
+        MAX(subbrand_id::varchar)   AS subbrand_id,
+        MAX(subbrand_nm::varchar)   AS subbrand_nm,
+        MAX(cat_id::varchar)        AS cat_id,
+        MAX(cat_nm::varchar)        AS cat_nm,
+        MAX(div_id::varchar)        AS div_id,
+        MAX(div_nm::varchar)        AS div_nm,
+        SUM(inv_qty)                AS total_inv_qty,
+        SUM(inv_val)                AS total_inv_val
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND COALESCE(date, inv_date) >= '2026-07-13' AND COALESCE(date, inv_date) <= '2026-07-14'
+      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
     GROUP BY 1, 2, 3, 4, 5, 6, 7
 ),
 
@@ -257,24 +257,24 @@ cte_sales_daily AS (
 ----------------------------------------------------------------------
 cte_nmrc_daily AS (
     SELECT 
-        source_schema::varchar AS source_schema,
-        distributor_id::varchar AS distributor_id,
-        sls_id::varchar AS sls_id,
-        tgl::date AS report_date,
-        MAX(tgt_call::numeric) AS tgt_call,
-        MAX(tcall_glb::numeric) AS tcall_glb,
-        MAX(rcall_kpl::numeric) AS rcall_kpl,
-        MAX(ec_kpl::numeric) AS ec_kpl
+        source_schema::varchar      AS source_schema,
+        distributor_id::varchar     AS distributor_id,
+        sls_id::varchar             AS sls_id,
+        tgl::date                   AS report_date,
+        MAX(tgt_call::numeric)      AS tgt_call,
+        MAX(tcall_glb::numeric)     AS tcall_glb,
+        MAX(rcall_kpl::numeric)     AS rcall_kpl,
+        MAX(ec_kpl::numeric)        AS ec_kpl
     FROM bift.bronze_nmrc_subdetail
     WHERE tgl >= '2026-07-13' AND tgl <= '2026-07-14'
     GROUP BY 1, 2, 3, 4
 )
 
 ----------------------------------------------------------------------
--- MAIN SELECT
+-- MAIN SELECT (JOIN 1:1 TERKUNCI DENGAN PRESISI)
 ----------------------------------------------------------------------
 SELECT 
-    b.source_schema,          -- 👈 SANGAT KRUSIAL: Kolom ini yang dicari index!
+    b.source_schema,
     b.gdiv_id,
     b.tahun AS year,
     b.periode AS period,
@@ -363,18 +363,21 @@ FROM cte_unique_activity b
 
 -- 1. JOIN MASTER OUTLET
 LEFT JOIN cte_master_outlet mo
-    ON b.distributor_id = mo.distributor_id
+    ON b.source_schema  = mo.source_schema
+   AND b.distributor_id = mo.distributor_id
    AND b.outlet_id      = mo.outlet_id
 
--- 2. JOIN MASTER SALESMAN (KUNCI GDIV + DISTRIBUTOR + SLS)
+-- 2. JOIN MASTER SALESMAN (KUNCI SOURCE_SCHEMA + GDIV + DISTRIBUTOR + SLS)
 LEFT JOIN cte_master_salesman ms
-    ON b.gdiv_id        = ms.gdiv_id
+    ON b.source_schema  = ms.source_schema
+   AND b.gdiv_id        = ms.gdiv_id
    AND b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES
+-- 3. JOIN TRANSAKSI SALES (KUNCI LENGKAP 1:1)
 LEFT JOIN cte_sales_daily sal
-    ON b.gdiv_id         = sal.gdiv_id
+    ON b.source_schema   = sal.source_schema
+   AND b.gdiv_id         = sal.gdiv_id
    AND b.distributor_id  = sal.distributor_id
    AND b.sls_id          = sal.sls_id
    AND b.outlet_id       = sal.outlet_id
@@ -387,14 +390,16 @@ LEFT JOIN cte_product_gdiv pg
 
 -- 5. JOIN GRADE TOKO
 LEFT JOIN cte_grading_daily gst
-    ON b.distributor_id  = gst.distributor_id
+    ON b.source_schema   = gst.source_schema
+   AND b.distributor_id  = gst.distributor_id
    AND b.sls_id          = gst.sls_id
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
 -- 6. JOIN IR DISPLAY
 LEFT JOIN cte_ir_daily ir
-    ON b.distributor_id  = ir.distributor_id
+    ON b.source_schema   = ir.source_schema
+   AND b.distributor_id  = ir.distributor_id
    AND b.sls_id          = ir.sls_id
    AND b.outlet_id       = ir.outlet_id
    AND b.pcode           = ir.pcode
@@ -402,6 +407,7 @@ LEFT JOIN cte_ir_daily ir
 
 -- 7. JOIN TARGET NMRC
 LEFT JOIN cte_nmrc_daily nm
-    ON b.distributor_id  = nm.distributor_id
+    ON b.source_schema   = nm.source_schema
+   AND b.distributor_id  = nm.distributor_id
    AND b.sls_id          = nm.sls_id
    AND b.activity_date   = nm.report_date
