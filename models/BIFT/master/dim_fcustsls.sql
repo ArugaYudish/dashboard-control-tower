@@ -3,9 +3,63 @@
         schema='bift',
         materialized='incremental',
         alias='dim_fcustsls',
-        unique_key=['source_schema', 'distributor_id', 'cust_id', 'sls_id', 'tahun', 'periode'],
+        unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode', 'source_schema'],
         incremental_strategy='delete+insert',
+        pre_hook="""
+            CREATE TABLE IF NOT EXISTS bift.dim_fcustsls (
+                source_schema text NULL,
+                _airbyte_raw_id text NULL,
+                _airbyte_extracted_at timestamptz NULL,
+                _airbyte_meta jsonb NULL,
+                _airbyte_generation_id int8 NULL,
+                distributor_id varchar NULL,
+                sls_id varchar NULL,
+                cust_id varchar NULL,
+                tahun numeric NULL,
+                periode numeric NULL,
+                tahun_periode numeric NULL,
+                channel_id varchar NULL,
+                channel_nm varchar NULL,
+                group_channel_id varchar NULL,
+                group_channel_nm varchar NULL,
+                flag_aktif varchar NULL,
+                group_outlet varchar NULL,
+                salesforce_id varchar NULL,
+                team_id varchar NULL,
+                nobrs numeric NULL,
+                route numeric NULL,
+                slimit numeric NULL,
+                hsenin varchar NULL,
+                hselasa varchar NULL,
+                hrabu varchar NULL,
+                hkamis varchar NULL,
+                hjumat varchar NULL,
+                hsabtu varchar NULL,
+                hminggu varchar NULL,
+                visit1 varchar NULL,
+                visit2 varchar NULL,
+                visit3 varchar NULL,
+                visit4 varchar NULL,
+                cycle_kunjungan text NULL
+            ) PARTITION BY LIST (tahun_periode);
+
+            DO $$
+            DECLARE
+                y INT;
+                p INT;
+                code INT;
+            BEGIN
+                FOR y IN 26..26 LOOP
+                    FOR p IN 1..12 LOOP
+                        code := y * 100 + p;
+                        EXECUTE format('CREATE TABLE IF NOT EXISTS bift.dim_fcustsls_p%s PARTITION OF bift.dim_fcustsls FOR VALUES IN (%s);', code, code);
+                    END LOOP;
+                END LOOP;
+                EXECUTE 'CREATE TABLE IF NOT EXISTS bift.dim_fcustsls_default PARTITION OF bift.dim_fcustsls DEFAULT;';
+            END $$;
+        """,
         indexes=[
+            {'columns': ['tahun_periode', 'distributor_id'], 'type': 'btree'},
             {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
             {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
             {'columns': ['source_schema', 'distributor_id', 'cust_id'], 'type': 'btree'}
@@ -156,6 +210,7 @@ SELECT
     cust_id,
     tahun,
     periode,
+    ((tahun % 100) * 100 + periode)::numeric AS tahun_periode,
     channel_id,
     channel_nm,
     group_channel_id,
