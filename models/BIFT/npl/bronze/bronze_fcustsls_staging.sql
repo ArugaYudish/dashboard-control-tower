@@ -73,27 +73,30 @@
 }}
 
 WITH customer_with_location AS (
-    SELECT DISTINCT ON (dc.distributor_id, dc.cust_id)
-        dc.distributor_id,
-        dc.cust_id,
-        dc.cust_nm,
-        dc.latitude,
-        dc.longitude,
-        loc.provinsi_code,
-        loc.provinsi_name,
-        loc.kabupaten_code,
-        loc.kabupaten_name,
-        loc.kecamatan_code,
-        loc.kecamatan_name,
-        loc.kelurahan_code,
-        loc.kelurahan_name
-    FROM bift.dim_customer dc
-    LEFT JOIN bift.dim_lokasi loc
-        ON dc.provinsi = loc.provinsi_code
-       AND dc.kabupaten = loc.kabupaten_code
-       AND dc.kecamatan = loc.kecamatan_code
-       AND dc.kelurahan = loc.kelurahan_code
-    ORDER BY dc.distributor_id, dc.cust_id
+    SELECT DISTINCT ON (f.subdist_id, f.custno)
+        f.subdist_id AS distributor_id,
+        f.custno AS cust_id,
+        f.custname AS cust_nm,
+        vol.latitude,
+        vol.longitude,
+        dl.provinsi_code,
+        dl.provinsi_name,
+        dl.kabupaten_code,
+        dl.kabupaten_name,
+        dl.kecamatan_code,
+        dl.kecamatan_name,
+        dl.kelurahan_code,
+        dl.kelurahan_name
+    FROM bift.dim_customer f
+    LEFT JOIN bift.dim_lokasi dl
+        ON f.prop_id = dl.provinsi_code 
+       AND f.kab_id = dl.kabupaten_code 
+       AND f.kec_id = dl.kecamatan_code 
+       AND f.kel_id = dl.kelurahan_code 
+    LEFT JOIN bift.dim_validasi_outlet_last vol
+        ON f.subdist_id = vol.distributor_id
+       AND f.custno = vol.cust_id
+    ORDER BY f.subdist_id, f.custno
 )
 
 SELECT 
