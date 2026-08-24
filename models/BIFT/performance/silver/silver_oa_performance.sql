@@ -16,9 +16,6 @@
 }}
 
 WITH 
--- ---------------------------------------------------------------------------
--- STEP 1 : CB Cover — Langsung Kunci Tahun 2026 Periode 7
--- ---------------------------------------------------------------------------
 cb_cover AS (
     SELECT 
         cs.source_schema,
@@ -79,8 +76,6 @@ cb_cover AS (
             OR cs.tahun < sh.termin_year
             OR (cs.tahun = sh.termin_year AND cs.periode <= sh.termin_period)
        )
-    WHERE cs.tahun = 2026 
-      AND cs.periode = 7
 ),
 
 -- ---------------------------------------------------------------------------
