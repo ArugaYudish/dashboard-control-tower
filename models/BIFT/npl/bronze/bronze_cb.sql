@@ -156,7 +156,7 @@ SELECT
     cwl.kelurahan_name,
     cwl.latitude,
     cwl.longitude
-FROM {{ ref('dim_fcustsls') }} dfs
+FROM bift.dim_fcustsls dfs
 LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND dfs.source_schema = mmgs.source_schema
@@ -172,20 +172,10 @@ WHERE dfs.channel_id != '999'
     AND dfs.periode = {{ var('periode') }}
     AND dfs.tahun = {{ var('tahun') }}
   {% else %}
-    {# Auto-detect: check directly from raw tables #}
-    AND (dfs.source_schema, dfs.tahun, dfs.periode) IN (
-        SELECT DISTINCT source_schema, tahun, periode
-        FROM (
-            SELECT 'm1' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m1.v_fcustsls_staging
-            UNION ALL
-            SELECT 'm2' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m2.v_fcustsls_staging
-            UNION ALL
-            SELECT 'm3' AS source_schema, tahun, periode, _airbyte_extracted_at FROM raw_ficom_m3.v_fcustsls_staging
-        ) raw_check
-        WHERE _airbyte_extracted_at > (
-            SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
-            FROM {{ this }}
-        )
+    {# Auto-detect: check directly from physical dim_fcustsls table #}
+    AND dfs._airbyte_extracted_at > (
+        SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
+        FROM {{ this }}
     )
   {% endif %}
 {% endif %}
