@@ -12,7 +12,7 @@ with cycle_week as materialized (
     end as flag,'param' as param
   from spx.m_cycle3
   where year = extract(year from current_date)
-  and period between 1 and extract(month from current_date) - 1
+  and period between 1 and extract(month from current_date)
 ),
 product_hierarchy as (
   select distinct
