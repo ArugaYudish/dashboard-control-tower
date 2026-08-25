@@ -1,17 +1,9 @@
 {{
     config(
         schema='bift',
-        materialized='table',
-        alias='silver_oa_performance',
-        indexes=[
-          {'columns': ['tahun', 'periode', 'distributor_id'],         'type': 'btree'},
-          {'columns': ['tahun', 'periode', 'sls_id'],                 'type': 'btree'},
-          {'columns': ['tahun', 'periode', 'cust_id'],                'type': 'btree'},
-          {'columns': ['tahun', 'periode', 'pcode'],                  'type': 'btree'},
-          {'columns': ['distributor_id', 'sls_id', 'cust_id'],        'type': 'btree'},
-          {'columns': ['gdiv_id', 'source_schema'],                   'type': 'btree'},
-          {'columns': ['is_transaction'],                             'type': 'btree'}
-        ]
+        materialized='incremental',
+        incremental_strategy='append',
+        alias='silver_oa_performance'
     )
 }}
 
@@ -70,7 +62,6 @@ cb_cover AS (
         ON cs.distributor_id = sh.distributor_id
        AND cs.sls_id         = sh.sls_id
        AND cs.source_schema  = sh.source_schema
-       -- Filter terminasi langsung di ON clause
        AND (
             sh.termin_year IS NULL
             OR cs.tahun < sh.termin_year
@@ -79,7 +70,7 @@ cb_cover AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- STEP 2 : Transactions — Index Scan Presisi Week 28 & 29 (6 - 19 Juli 2026)
+-- STEP 2 : Transactions (Loop per Batch Week)
 -- ---------------------------------------------------------------------------
 trx AS (
     SELECT 
@@ -127,7 +118,7 @@ trx AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- STEP 3A : Purchasing stream (Stream B - Transaksi SFA)
+-- STEP 3A : Purchasing stream
 -- ---------------------------------------------------------------------------
 trx_rows AS (
     SELECT 
@@ -209,12 +200,10 @@ trx_rows AS (
        AND cb.cust_id        = trx.cust_id
        AND cb.tahun          = trx.tahun
        AND cb.periode        = trx.periode
-),
+)
 
--- ---------------------------------------------------------------------------
--- STEP 3B : Master CB stream (Stream A - Universe Toko Pasif)
--- ---------------------------------------------------------------------------
-non_purchasing_rows AS (
+{% if not is_incremental() %}
+, non_purchasing_rows AS (
     SELECT 
         cb.source_schema,
         cb.tahun,
@@ -289,7 +278,11 @@ non_purchasing_rows AS (
         0 AS is_transaction
     FROM cb_cover cb
 )
+{% endif %}
 
 SELECT * FROM trx_rows
+
+{% if not is_incremental() %}
 UNION ALL
 SELECT * FROM non_purchasing_rows
+{% endif %}
