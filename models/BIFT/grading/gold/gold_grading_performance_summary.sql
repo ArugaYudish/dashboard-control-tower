@@ -18,93 +18,94 @@
 
 WITH 
 ----------------------------------------------------------------------
--- 0. KAMUS MASTER PRODUK & SUBBRAND
+-- 0. KAMUS MASTER PRODUK & SUBBRAND (fmaster + dim_mapping_subbrand)
 ----------------------------------------------------------------------
 cte_product_gdiv AS (
     SELECT DISTINCT
-        p.pcode::varchar            AS pcode,
-        p.pcodename::varchar        AS pcode_nm,
-        mms.subbrand_id::varchar    AS subbrand_id,
-        mms.subbrand_nm::varchar    AS subbrand_nm,
-        mms.cat_id::varchar         AS cat_id,
-        mms.cat_nm::varchar         AS cat_nm,
-        mms.gdiv_id::varchar        AS product_gdiv_id,
-        mms.gdiv_nm::varchar        AS product_gdiv_nm,
-        mms.div_id::varchar         AS div_id,
-        mms.div_nm::varchar         AS div_nm
+        TRIM(p.pcode::varchar)            AS pcode,
+        p.pcodename::varchar              AS pcode_nm,
+        mms.subbrand_id::varchar          AS subbrand_id,
+        mms.subbrand_nm::varchar          AS subbrand_nm,
+        mms.cat_id::varchar               AS cat_id,
+        mms.cat_nm::varchar               AS cat_nm,
+        mms.gdiv_id::varchar              AS product_gdiv_id,
+        mms.gdiv_nm::varchar              AS product_gdiv_nm,
+        mms.div_id::varchar               AS div_id,
+        mms.div_nm::varchar               AS div_nm
     FROM raw_ho.fmaster p
     LEFT JOIN bift.dim_mapping_subbrand mms 
         ON (COALESCE(p.prlin::varchar, '') || COALESCE(p.brand::varchar, '') || COALESCE(p.sbra1::varchar, '')) = mms.subbrand_id::varchar
 ),
 
 ----------------------------------------------------------------------
--- 1. MASTER SALESMAN HIERARKI
+-- 1. MASTER SALESMAN HIERARKI (DARI BRONZE SALESMAN HIERARCHY)
 ----------------------------------------------------------------------
 cte_master_salesman AS (
-    SELECT DISTINCT ON (distributor_id, sls_id)
-        source_schema::varchar      AS source_schema,
-        gdiv_id::varchar            AS gdiv_id,
-        gdiv_nm::varchar            AS gdiv_nm,
-        distributor_id::varchar     AS distributor_id,
-        distributor_nm::varchar     AS distributor_nm,
-        sls_id::varchar             AS sls_id,
-        sls_nm::varchar             AS sls_nm,
-        sd_id::varchar              AS sd_id,
-        sd_nm::varchar              AS sd_nm,
-        nsm_id::varchar             AS nsm_id,
-        nsm_nm::varchar             AS nsm_nm,
-        grsm_id::varchar            AS grsm_id,
-        grsm_nm::varchar            AS grsm_nm,
-        rsm_id::varchar             AS rsm_id,
-        rsm_nm::varchar             AS rsm_nm,
-        ss_id::varchar              AS ss_id,
-        ss_nm::varchar              AS ss_nm
+    SELECT DISTINCT ON (TRIM(distributor_id::varchar), TRIM(sls_id::varchar))
+        source_schema::varchar            AS source_schema,
+        gdiv_id::varchar                  AS gdiv_id,
+        gdiv_nm::varchar                  AS gdiv_nm,
+        TRIM(distributor_id::varchar)     AS distributor_id,
+        distributor_nm::varchar           AS distributor_nm,
+        TRIM(sls_id::varchar)             AS sls_id,
+        sls_nm::varchar                   AS sls_nm,
+        sd_id::varchar                    AS sd_id,
+        sd_nm::varchar                    AS sd_nm,
+        nsm_id::varchar                   AS nsm_id,
+        nsm_nm::varchar                   AS nsm_nm,
+        grsm_id::varchar                  AS grsm_id,
+        grsm_nm::varchar                  AS grsm_nm,
+        rsm_id::varchar                   AS rsm_id,
+        rsm_nm::varchar                   AS rsm_nm,
+        ss_id::varchar                    AS ss_id,
+        ss_nm::varchar                    AS ss_nm
     FROM bift.bronze_salesman_hierarchy
-    ORDER BY distributor_id, sls_id
+    ORDER BY TRIM(distributor_id::varchar), TRIM(sls_id::varchar)
 ),
 
 ----------------------------------------------------------------------
--- 2. MASTER OUTLET
+-- 2. MASTER OUTLET (DARI SILVER OA PERIODE 7)
 ----------------------------------------------------------------------
 cte_master_outlet AS (
-    SELECT DISTINCT ON (distributor_id, cust_id)
-        source_schema::varchar      AS source_schema,
-        distributor_id::varchar     AS distributor_id,
-        cust_id::varchar            AS outlet_id,
-        cust_nm::varchar            AS cust_nm,
-        kabupaten_name::varchar     AS city,
-        channel_id::varchar         AS channel_id,
-        channel_nm::varchar         AS channel_nm,
-        group_channel_id::varchar   AS group_channel_id,
-        group_channel_nm::varchar   AS group_channel_nm,
-        salesforce_id::varchar      AS salesforce_id,
-        salesforce_nm::varchar      AS salesforce_nm,
-        gsalesforce1_id::varchar    AS gsalesforce_id,
-        gsalesforce1_nm::varchar    AS gsalesforce_nm
+    SELECT DISTINCT ON (TRIM(distributor_id::varchar), TRIM(cust_id::varchar))
+        source_schema::varchar            AS source_schema,
+        TRIM(distributor_id::varchar)     AS distributor_id,
+        TRIM(cust_id::varchar)            AS outlet_id,
+        cust_nm::varchar                  AS cust_nm,
+        kabupaten_name::varchar           AS city,
+        channel_id::varchar               AS channel_id,
+        channel_nm::varchar               AS channel_nm,
+        group_channel_id::varchar         AS group_channel_id,
+        group_channel_nm::varchar         AS group_channel_nm,
+        salesforce_id::varchar            AS salesforce_id,
+        salesforce_nm::varchar            AS salesforce_nm,
+        gsalesforce1_id::varchar          AS gsalesforce_id,
+        gsalesforce1_nm::varchar          AS gsalesforce_nm
     FROM {{ ref('silver_oa_performance') }}
     WHERE tahun = 2026 AND periode = 7 AND is_transaction = 0
-    ORDER BY distributor_id, cust_id
+    ORDER BY TRIM(distributor_id::varchar), TRIM(cust_id::varchar)
 ),
 
 ----------------------------------------------------------------------
--- 3. BACKBONE KEGIATAN HARIAN
+-- 3. BACKBONE KEGIATAN HARIAN (CAST DATE PRESISI)
 ----------------------------------------------------------------------
 cte_backbone AS (
     -- Sumber 1: Transaksi SFA Harian
     SELECT 
-        source_schema::varchar      AS source_schema,
-        gdiv_id::varchar            AS gdiv_id,
-        distributor_id::varchar     AS distributor_id,
-        sls_id::varchar             AS sls_id,
-        cust_id::varchar            AS outlet_id,
-        pcode::varchar              AS pcode,
-        COALESCE(inv_date, date)    AS activity_date,
-        tahun::numeric              AS tahun,
-        periode::numeric            AS periode,
-        week::numeric               AS week
+        source_schema::varchar                  AS source_schema,
+        gdiv_id::varchar                        AS gdiv_id,
+        TRIM(distributor_id::varchar)           AS distributor_id,
+        TRIM(sls_id::varchar)                   AS sls_id,
+        TRIM(cust_id::varchar)                  AS outlet_id,
+        TRIM(pcode::varchar)                    AS pcode,
+        COALESCE(inv_date::date, date::date)    AS activity_date,
+        tahun::numeric                          AS tahun,
+        periode::numeric                        AS periode,
+        week::numeric                           AS week
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
+      AND COALESCE(inv_date::date, date::date) >= '2026-07-13' 
+      AND COALESCE(inv_date::date, date::date) <= '2026-07-14'
 
     UNION ALL
 
@@ -112,16 +113,16 @@ cte_backbone AS (
     SELECT 
         COALESCE(a.source_schema::varchar, 'spx') AS source_schema,
         'UNKNOWN_GDIV'::varchar                   AS gdiv_id,
-        a.distributor_id::varchar                 AS distributor_id,
-        a.sls_id::varchar                         AS sls_id,
-        a.outlet_id::varchar                      AS outlet_id,
-        a.pcode::varchar                          AS pcode,
+        TRIM(a.distributor_id::varchar)           AS distributor_id,
+        TRIM(a.sls_id::varchar)                   AS sls_id,
+        TRIM(a.outlet_id::varchar)                AS outlet_id,
+        TRIM(a.pcode::varchar)                    AS pcode,
         a.visit_date::date                        AS activity_date,
         2026::numeric                             AS tahun,
         7::numeric                                AS periode,
         28::numeric                               AS week
     FROM bift.bronze_rcall_avis_d a
-    WHERE a.visit_date >= '2026-07-13' AND a.visit_date <= '2026-07-14'
+    WHERE a.visit_date::date >= '2026-07-13' AND a.visit_date::date <= '2026-07-14'
 
     UNION ALL
 
@@ -129,31 +130,31 @@ cte_backbone AS (
     SELECT 
         COALESCE(g.source_schema::varchar, 'spx') AS source_schema,
         'UNKNOWN_GDIV'::varchar                   AS gdiv_id,
-        g.distributor_id::varchar                 AS distributor_id,
-        g.sls_id::varchar                         AS sls_id,
-        g.outlet_id::varchar                      AS outlet_id,
+        TRIM(g.distributor_id::varchar)           AS distributor_id,
+        TRIM(g.sls_id::varchar)                   AS sls_id,
+        TRIM(g.outlet_id::varchar)                AS outlet_id,
         NULL::varchar                             AS pcode,
         g.visit_date::date                        AS activity_date,
         2026::numeric                             AS tahun,
         7::numeric                                AS periode,
         28::numeric                               AS week
     FROM bift.bronze_grading_ir g
-    WHERE g.visit_date >= '2026-07-13' AND g.visit_date <= '2026-07-14'
+    WHERE g.visit_date::date >= '2026-07-13' AND g.visit_date::date <= '2026-07-14'
 
     UNION ALL
 
     -- Sumber 4: Toko CB Pasif (Master Bulanan)
     SELECT 
-        source_schema::varchar      AS source_schema,
-        gdiv_id::varchar            AS gdiv_id,
-        distributor_id::varchar     AS distributor_id,
-        sls_id::varchar             AS sls_id,
-        cust_id::varchar            AS outlet_id,
-        NULL::varchar               AS pcode,
-        NULL::date                  AS activity_date,
-        tahun::numeric              AS tahun,
-        periode::numeric            AS periode,
-        week::numeric               AS week
+        source_schema::varchar                  AS source_schema,
+        gdiv_id::varchar                        AS gdiv_id,
+        TRIM(distributor_id::varchar)           AS distributor_id,
+        TRIM(sls_id::varchar)                   AS sls_id,
+        TRIM(cust_id::varchar)                  AS outlet_id,
+        NULL::varchar                           AS pcode,
+        NULL::date                              AS activity_date,
+        tahun::numeric                          AS tahun,
+        periode::numeric                        AS periode,
+        week::numeric                           AS week
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 0
       AND tahun = 2026 AND periode = 7
@@ -179,29 +180,29 @@ cte_unique_activity AS (
 ),
 
 ----------------------------------------------------------------------
--- 5. AGREGASI GRADING HARIAN
+-- 5. AGREGASI GRADING HARIAN (BEST GRADE + BANDING DEFENSIVE JOIN)
 ----------------------------------------------------------------------
 cte_grading_daily AS (
     SELECT 
-        g.distributor_id::varchar AS distributor_id,
-        g.outlet_id::varchar      AS outlet_id,
-        g.visit_date::date        AS visit_date,
+        TRIM(g.distributor_id::varchar) AS distributor_id,
+        TRIM(g.outlet_id::varchar)      AS outlet_id,
+        g.visit_date::date              AS visit_date,
         CASE 
-            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'A') THEN 'A'
-            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'B') THEN 'B'
-            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'C') THEN 'C'
-            WHEN bool_or(COALESCE(b.grade::varchar, g.grade::varchar) = 'D') THEN 'D'
-            ELSE MIN(COALESCE(b.grade::varchar, g.grade::varchar))
+            WHEN bool_or(COALESCE(TRIM(b.grade::varchar), TRIM(g.grade::varchar)) = 'A') THEN 'A'
+            WHEN bool_or(COALESCE(TRIM(b.grade::varchar), TRIM(g.grade::varchar)) = 'B') THEN 'B'
+            WHEN bool_or(COALESCE(TRIM(b.grade::varchar), TRIM(g.grade::varchar)) = 'C') THEN 'C'
+            WHEN bool_or(COALESCE(TRIM(b.grade::varchar), TRIM(g.grade::varchar)) = 'D') THEN 'D'
+            ELSE MIN(COALESCE(TRIM(b.grade::varchar), TRIM(g.grade::varchar)))
         END AS final_grade,
         MAX(COALESCE(b.kode_ap::varchar, g.kode_ap::varchar)) AS kode_ap
     FROM bift.bronze_grading_ir g
     LEFT JOIN bift.bronze_grading_banding b
-        ON g.distributor_id::varchar = b.distributor_id::varchar
-       AND g.outlet_id::varchar      = b.outlet_id::varchar
-       AND g.sls_id::varchar         = b.sls_id::varchar
-       AND g.kode_ap::varchar        = b.kode_ap::varchar
-       AND g.visit_date::date        = b.visit_date::date
-    WHERE g.visit_date >= '2026-07-13' AND g.visit_date <= '2026-07-14'
+        ON TRIM(g.distributor_id::varchar) = TRIM(b.distributor_id::varchar)
+       AND TRIM(g.outlet_id::varchar)      = TRIM(b.outlet_id::varchar)
+       AND TRIM(g.sls_id::varchar)         = TRIM(b.sls_id::varchar)
+       AND TRIM(g.kode_ap::varchar)        = TRIM(b.kode_ap::varchar)
+       AND g.visit_date::date              = b.visit_date::date
+    WHERE g.visit_date::date >= '2026-07-13' AND g.visit_date::date <= '2026-07-14'
     GROUP BY 1, 2, 3
 ),
 
@@ -210,42 +211,45 @@ cte_grading_daily AS (
 ----------------------------------------------------------------------
 cte_ir_daily AS (
     SELECT 
-        a.distributor_id::varchar AS distributor_id,
-        a.sls_id::varchar         AS sls_id,
-        a.outlet_id::varchar      AS outlet_id,
-        a.pcode::varchar          AS pcode,
-        a.visit_date::date        AS visit_date,
-        MAX(a.kode_ap::varchar)   AS kode_ap,
+        TRIM(a.distributor_id::varchar) AS distributor_id,
+        TRIM(a.sls_id::varchar)         AS sls_id,
+        TRIM(a.outlet_id::varchar)      AS outlet_id,
+        TRIM(a.pcode::varchar)          AS pcode,
+        a.visit_date::date              AS visit_date,
+        MAX(a.kode_ap::varchar)         AS kode_ap,
         SUM(COALESCE(m.count_facing::integer, a.count_facing::integer, 0)) AS total_facing,
         1 AS is_ir_detected
     FROM bift.bronze_rcall_avis_d a
     LEFT JOIN (
         SELECT 
-            distributor_id::varchar AS distributor_id, 
-            outlet_id::varchar      AS outlet_id,
-            sls_id::varchar         AS sls_id, 
-            kode_ap::varchar        AS kode_ap, 
-            pcode::varchar          AS pcode, 
-            visit_date::date        AS visit_date,
-            MAX(count_facing::integer) AS count_facing
+            TRIM(distributor_id::varchar) AS distributor_id, 
+            TRIM(outlet_id::varchar)      AS outlet_id,
+            TRIM(sls_id::varchar)         AS sls_id, 
+            TRIM(kode_ap::varchar)        AS kode_ap, 
+            TRIM(pcode::varchar)          AS pcode, 
+            visit_date::date              AS visit_date,
+            MAX(count_facing::integer)    AS count_facing
         FROM bift.bronze_rcall_avis_manual
-        WHERE visit_date >= '2026-07-13' AND visit_date <= '2026-07-14'
+        WHERE visit_date::date >= '2026-07-13' AND visit_date::date <= '2026-07-14'
         GROUP BY 1, 2, 3, 4, 5, 6
     ) m 
-        ON a.distributor_id::varchar = m.distributor_id 
-       AND a.outlet_id::varchar      = m.outlet_id
-       AND a.sls_id::varchar         = m.sls_id 
-       AND a.kode_ap::varchar        = m.kode_ap
-       AND a.pcode::varchar          = m.pcode 
-       AND a.visit_date::date        = m.visit_date
-    WHERE a.visit_date >= '2026-07-13' AND a.visit_date <= '2026-07-14'
+        ON TRIM(a.distributor_id::varchar) = m.distributor_id 
+       AND TRIM(a.outlet_id::varchar)      = m.outlet_id
+       AND TRIM(a.sls_id::varchar)         = m.sls_id 
+       AND TRIM(a.kode_ap::varchar)        = m.kode_ap
+       AND TRIM(a.pcode::varchar)          = m.pcode 
+       AND a.visit_date::date              = m.visit_date
+    WHERE a.visit_date::date >= '2026-07-13' AND a.visit_date::date <= '2026-07-14'
     GROUP BY 1, 2, 3, 4, 5
 ),
 cte_ir_outlet_flag AS (
-    -- Flag apakah toko dikunjungi foto IR di hari itu (Level Outlet)
-    SELECT DISTINCT distributor_id::varchar AS distributor_id, outlet_id::varchar AS outlet_id, visit_date::date AS visit_date
+    -- Flag kunjungan IR level Outlet & Tanggal
+    SELECT DISTINCT 
+        TRIM(distributor_id::varchar) AS distributor_id, 
+        TRIM(outlet_id::varchar)      AS outlet_id, 
+        visit_date::date              AS visit_date
     FROM bift.bronze_rcall_avis_d
-    WHERE visit_date >= '2026-07-13' AND visit_date <= '2026-07-14'
+    WHERE visit_date::date >= '2026-07-13' AND visit_date::date <= '2026-07-14'
 ),
 
 ----------------------------------------------------------------------
@@ -253,33 +257,38 @@ cte_ir_outlet_flag AS (
 ----------------------------------------------------------------------
 cte_sales_daily AS (
     SELECT 
-        distributor_id::varchar     AS distributor_id,
-        sls_id::varchar             AS sls_id,
-        cust_id::varchar            AS outlet_id,
-        pcode::varchar              AS pcode,
-        COALESCE(inv_date, date)    AS sales_date,
-        MAX(source_schema::varchar) AS source_schema,
-        MAX(gdiv_id::varchar)       AS gdiv_id,
-        MAX(pcode_nm::varchar)      AS pcode_nm,
-        MAX(subbrand_id::varchar)   AS subbrand_id,
-        MAX(subbrand_nm::varchar)   AS subbrand_nm,
-        MAX(cat_id::varchar)        AS cat_id,
-        MAX(cat_nm::varchar)        AS cat_nm,
-        MAX(div_id::varchar)        AS div_id,
-        MAX(div_nm::varchar)        AS div_nm,
-        SUM(inv_qty)                AS total_inv_qty,
-        SUM(inv_val)                AS total_inv_val
+        TRIM(distributor_id::varchar)           AS distributor_id,
+        TRIM(sls_id::varchar)                   AS sls_id,
+        TRIM(cust_id::varchar)                  AS outlet_id,
+        TRIM(pcode::varchar)                    AS pcode,
+        COALESCE(inv_date::date, date::date)    AS sales_date,
+        MAX(source_schema::varchar)             AS source_schema,
+        MAX(gdiv_id::varchar)                   AS gdiv_id,
+        MAX(pcode_nm::varchar)                  AS pcode_nm,
+        MAX(subbrand_id::varchar)               AS subbrand_id,
+        MAX(subbrand_nm::varchar)               AS subbrand_nm,
+        MAX(cat_id::varchar)                    AS cat_id,
+        MAX(cat_nm::varchar)                    AS cat_nm,
+        MAX(div_id::varchar)                    AS div_id,
+        MAX(div_nm::varchar)                    AS div_nm,
+        SUM(inv_qty)                            AS total_inv_qty,
+        SUM(inv_val)                            AS total_inv_val
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1
-      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
+      AND COALESCE(inv_date::date, date::date) >= '2026-07-13' 
+      AND COALESCE(inv_date::date, date::date) <= '2026-07-14'
     GROUP BY 1, 2, 3, 4, 5
 ),
 cte_sales_outlet_flag AS (
-    -- Flag apakah toko belanja riil > 0 di hari itu (Level Outlet)
-    SELECT distributor_id::varchar AS distributor_id, cust_id::varchar AS outlet_id, COALESCE(inv_date, date) AS sales_date
+    -- Flag pembelian riil level Outlet & Tanggal
+    SELECT 
+        TRIM(distributor_id::varchar)           AS distributor_id, 
+        TRIM(cust_id::varchar)                  AS outlet_id, 
+        COALESCE(inv_date::date, date::date)    AS sales_date
     FROM {{ ref('silver_oa_performance') }}
     WHERE is_transaction = 1 AND inv_qty > 0
-      AND COALESCE(inv_date, date) >= '2026-07-13' AND COALESCE(inv_date, date) <= '2026-07-14'
+      AND COALESCE(inv_date::date, date::date) >= '2026-07-13' 
+      AND COALESCE(inv_date::date, date::date) <= '2026-07-14'
     GROUP BY 1, 2, 3
 ),
 
@@ -288,15 +297,15 @@ cte_sales_outlet_flag AS (
 ----------------------------------------------------------------------
 cte_nmrc_daily AS (
     SELECT 
-        distributor_id::varchar     AS distributor_id,
-        sls_id::varchar             AS sls_id,
-        tgl::date                   AS report_date,
-        MAX(tgt_call::numeric)      AS tgt_call,
-        MAX(tcall_glb::numeric)     AS tcall_glb,
-        MAX(rcall_kpl::numeric)     AS rcall_kpl,
-        MAX(ec_kpl::numeric)        AS ec_kpl
+        TRIM(distributor_id::varchar) AS distributor_id,
+        TRIM(sls_id::varchar)         AS sls_id,
+        tgl::date                     AS report_date,
+        MAX(tgt_call::numeric)        AS tgt_call,
+        MAX(tcall_glb::numeric)       AS tcall_glb,
+        MAX(rcall_kpl::numeric)       AS rcall_kpl,
+        MAX(ec_kpl::numeric)          AS ec_kpl
     FROM bift.bronze_nmrc_subdetail
-    WHERE tgl >= '2026-07-13' AND tgl <= '2026-07-14'
+    WHERE tgl::date >= '2026-07-13' AND tgl::date <= '2026-07-14'
     GROUP BY 1, 2, 3
 )
 
@@ -373,7 +382,7 @@ SELECT
     COALESCE(sal.total_inv_qty, 0) AS inv_qty,
     COALESCE(sal.total_inv_val, 0) AS inv_val,
     
-    -- EFFECTIVE CALL (EC) INDICATORS (LEVEL TOKO / OUTLET RIIL)
+    -- EFFECTIVE CALL (EC) INDICATORS (LEVEL TOKO & TANGGAL RIIL)
     CASE WHEN COALESCE(sal.total_inv_qty, 0) > 0 THEN 1 ELSE 0 END AS is_ec_transaction,
     CASE WHEN COALESCE(ir.is_ir_detected, 0) = 1 THEN 1 ELSE 0 END AS is_ec_display,
     CASE WHEN (sof.outlet_id IS NOT NULL AND iof.outlet_id IS NOT NULL) THEN 1 ELSE 0 END AS is_ec_avis,
@@ -401,7 +410,7 @@ LEFT JOIN cte_master_salesman ms
     ON b.distributor_id = ms.distributor_id
    AND b.sls_id         = ms.sls_id
 
--- 3. JOIN TRANSAKSI SALES
+-- 3. JOIN TRANSAKSI SALES (DIST + SLS + OUTLET + PCODE + DATE)
 LEFT JOIN cte_sales_daily sal
     ON b.distributor_id  = sal.distributor_id
    AND b.sls_id          = sal.sls_id
@@ -413,13 +422,13 @@ LEFT JOIN cte_sales_daily sal
 LEFT JOIN cte_product_gdiv pg
     ON b.pcode = pg.pcode
 
--- 5. JOIN GRADE TOKO
+-- 5. JOIN GRADE TOKO (OUTLET + TANGGAL AUDIT)
 LEFT JOIN cte_grading_daily gst
     ON b.distributor_id  = gst.distributor_id
    AND b.outlet_id       = gst.outlet_id
    AND b.activity_date   = gst.visit_date
 
--- 6. JOIN IR DISPLAY
+-- 6. JOIN IR DISPLAY (DIST + SLS + OUTLET + PCODE + DATE)
 LEFT JOIN cte_ir_daily ir
     ON b.distributor_id  = ir.distributor_id
    AND b.sls_id          = ir.sls_id
@@ -427,7 +436,7 @@ LEFT JOIN cte_ir_daily ir
    AND b.pcode           = ir.pcode
    AND b.activity_date   = ir.visit_date
 
--- 7. JOIN LEVEL-OUTLET FLAGS UNTUK EC AVIS
+-- 7. JOIN LEVEL-OUTLET FLAGS (EC AVIS)
 LEFT JOIN cte_sales_outlet_flag sof
     ON b.distributor_id  = sof.distributor_id
    AND b.outlet_id       = sof.outlet_id
