@@ -202,7 +202,6 @@ FROM bift.dim_fcustsls dfs
 INNER JOIN bift.dim_salesman_hierarchy sh 
     ON dfs.distributor_id = sh.distributor_id
    AND dfs.sls_id         = sh.sls_id
-   AND dfs.source_schema  = sh.source_schema
    AND (
         sh.termin_year IS NULL
         OR dfs.tahun < sh.termin_year
