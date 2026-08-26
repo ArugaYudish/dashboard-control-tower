@@ -3,7 +3,7 @@
         schema='bift',
         materialized='incremental',
         alias='dim_fcustsls',
-        unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode', 'source_schema'],
+        unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
         incremental_strategy='delete+insert',
         pre_hook="""
             CREATE TABLE IF NOT EXISTS bift.dim_fcustsls (
@@ -169,7 +169,7 @@ staging_with_max_date AS (
     SELECT
         *,
         MAX(upd_date) OVER (
-            PARTITION BY source_schema, distributor_id, tahun, periode
+            PARTITION BY distributor_id, sls_id, cust_id, tahun, periode
         ) AS upd_date_terakhir
     FROM combined_staging
     WHERE cust_id IS NOT NULL 
@@ -185,18 +185,18 @@ latest_date_per_distributor AS (
 ),
 
 latest_staging_per_period AS (
-    SELECT DISTINCT ON (source_schema, distributor_id, cust_id, sls_id, tahun, periode)
+    SELECT DISTINCT ON (distributor_id, sls_id, cust_id, tahun, periode)
         *
     FROM latest_date_per_distributor
     ORDER BY 
-        source_schema,
         distributor_id,
-        cust_id,
         sls_id,
+        cust_id,
         tahun DESC,
         periode DESC,
         upd_date DESC NULLS LAST,
-        _airbyte_extracted_at DESC NULLS LAST
+        _airbyte_extracted_at DESC NULLS LAST,
+        source_schema ASC
 )
 
 SELECT 
