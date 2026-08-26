@@ -5,7 +5,93 @@
         alias='bronze_cb',
         unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
         incremental_strategy='delete+insert',
+        pre_hook="""
+            CREATE TABLE IF NOT EXISTS bift.bronze_cb (
+                source_schema text NULL,
+                _airbyte_extracted_at timestamptz NULL,
+                tahun numeric NULL,
+                periode numeric NULL,
+                tahun_periode numeric NULL,
+                gdiv_id text NULL,
+                gdiv_nm text NULL,
+                sd_id varchar NULL,
+                sd_nm varchar NULL,
+                nsm_id varchar NULL,
+                nsm_nm varchar NULL,
+                grsm_id varchar NULL,
+                grsm_nm varchar NULL,
+                rsm_id varchar NULL,
+                rsm_nm varchar NULL,
+                ss_id varchar NULL,
+                ss_nm varchar NULL,
+                distributor_id varchar NULL,
+                distributor_nm varchar NULL,
+                sls_id varchar NULL,
+                sls_nm varchar NULL,
+                opr_type varchar NULL,
+                salesforce_div_id varchar NULL,
+                salesforce_div_nm varchar NULL,
+                gsalesforce_id varchar NULL,
+                gsalesforce_nm varchar NULL,
+                cust_id varchar NULL,
+                cust_nm varchar NULL,
+                channel_id varchar NULL,
+                channel_nm varchar NULL,
+                group_channel_id varchar NULL,
+                group_channel_nm varchar NULL,
+                flag_aktif varchar NULL,
+                group_outlet varchar NULL,
+                salesforce_id varchar NULL,
+                gsalesforce1_id text NULL,
+                gsalesforce1_nm text NULL,
+                gsalesforce2_id varchar NULL,
+                gsalesforce2_nm varchar NULL,
+                salesforce_nm varchar NULL,
+                team_id varchar NULL,
+                nobrs numeric NULL,
+                route numeric NULL,
+                slimit numeric NULL,
+                hsenin varchar NULL,
+                hselasa varchar NULL,
+                hrabu varchar NULL,
+                hkamis varchar NULL,
+                hjumat varchar NULL,
+                hsabtu varchar NULL,
+                hminggu varchar NULL,
+                visit1 varchar NULL,
+                visit2 varchar NULL,
+                visit3 varchar NULL,
+                visit4 varchar NULL,
+                cycle_kunjungan text NULL,
+                provinsi_code varchar NULL,
+                provinsi_name varchar NULL,
+                kabupaten_code varchar NULL,
+                kabupaten_name varchar NULL,
+                kecamatan_code varchar NULL,
+                kecamatan_name varchar NULL,
+                kelurahan_code varchar NULL,
+                kelurahan_name varchar NULL,
+                latitude varchar NULL,
+                longitude varchar NULL
+            ) PARTITION BY LIST (tahun_periode);
+
+            DO $$
+            DECLARE
+                y INT;
+                p INT;
+                code INT;
+            BEGIN
+                FOR y IN 26..26 LOOP
+                    FOR p IN 1..12 LOOP
+                        code := y * 100 + p;
+                        EXECUTE format('CREATE TABLE IF NOT EXISTS bift.bronze_cb_p%s PARTITION OF bift.bronze_cb FOR VALUES IN (%s);', code, code);
+                    END LOOP;
+                END LOOP;
+                EXECUTE 'CREATE TABLE IF NOT EXISTS bift.bronze_cb_default PARTITION OF bift.bronze_cb DEFAULT;';
+            END $$;
+        """,
         indexes=[
+          {'columns': ['tahun_periode', 'distributor_id'], 'type': 'btree'},
           {'columns': ['periode', 'tahun', 'distributor_id'], 'type': 'btree'},
           {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'}
         ]
