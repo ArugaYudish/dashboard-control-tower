@@ -1,9 +1,17 @@
 {{
     config(
         schema='bift',
-        materialized='incremental',
-        incremental_strategy='append',
-        alias='silver_oa_performance'
+        materialized='table',
+        alias='silver_oa_performance',
+        indexes=[
+          {'columns': ['tahun', 'periode', 'distributor_id'],         'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'sls_id'],                 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'cust_id'],                'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'pcode'],                  'type': 'btree'},
+          {'columns': ['distributor_id', 'sls_id', 'cust_id'],        'type': 'btree'},
+          {'columns': ['gdiv_id', 'source_schema'],                   'type': 'btree'},
+          {'columns': ['is_transaction'],                             'type': 'btree'}
+        ]
     )
 }}
 
@@ -69,9 +77,6 @@ cb_cover AS (
        )
 ),
 
--- ---------------------------------------------------------------------------
--- STEP 2 : Transactions (Loop per Batch Week)
--- ---------------------------------------------------------------------------
 trx AS (
     SELECT 
         vd.subdist_id AS distributor_id,
@@ -118,7 +123,7 @@ trx AS (
 ),
 
 -- ---------------------------------------------------------------------------
--- STEP 3A : Purchasing stream
+-- STEP 3A : Purchasing stream (Stream B - Transaksi SFA)
 -- ---------------------------------------------------------------------------
 trx_rows AS (
     SELECT 
@@ -200,10 +205,12 @@ trx_rows AS (
        AND cb.cust_id        = trx.cust_id
        AND cb.tahun          = trx.tahun
        AND cb.periode        = trx.periode
-)
+),
 
-{% if not is_incremental() %}
-, non_purchasing_rows AS (
+-- ---------------------------------------------------------------------------
+-- STEP 3B : Master CB stream (Stream A - Universe Toko Pasif)
+-- ---------------------------------------------------------------------------
+non_purchasing_rows AS (
     SELECT 
         cb.source_schema,
         cb.tahun,
@@ -278,11 +285,7 @@ trx_rows AS (
         0 AS is_transaction
     FROM cb_cover cb
 )
-{% endif %}
 
 SELECT * FROM trx_rows
-
-{% if not is_incremental() %}
 UNION ALL
 SELECT * FROM non_purchasing_rows
-{% endif %}
