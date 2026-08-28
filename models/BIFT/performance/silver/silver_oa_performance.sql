@@ -93,7 +93,7 @@ trx AS (
         COALESCE(vd.inv_val::numeric, 0) AS inv_val,
         f.pcode_nm,
         COALESCE(
-            vd.inv_qty::numeric / NULLIF(f.conv_unit2 * f.conv_unit3, 0),
+            vd.inv_qty::numeric / NULLIF(f.conv_unit3, 0),
             0
         ) AS qty_carton,
         f.gdiv_id AS product_gdiv_id,
