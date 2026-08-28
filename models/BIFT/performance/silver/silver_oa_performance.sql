@@ -111,7 +111,7 @@ trx AS (
         f.sbu_id,
         f.sbu_nm
     FROM (
-        {% for w in range(18, 18) %}
+        {% for w in range(18, 19) %}
         SELECT *
         FROM spx.vfsales_det
         WHERE week_no = {{ w }}
