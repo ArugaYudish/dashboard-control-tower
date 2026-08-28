@@ -76,7 +76,6 @@ cb_cover AS (
             OR (cs.tahun = sh.termin_year AND cs.periode <= sh.termin_period)
        )
 ),
-
 trx AS (
     SELECT 
         vd.subdist_id AS distributor_id,
@@ -111,12 +110,9 @@ trx AS (
         f.sbu_id,
         f.sbu_nm
     FROM (
-        {% for w in range(18, 19) %}
         SELECT *
         FROM spx.vfsales_det
-        WHERE week_no = {{ w }}
-        {% if not loop.last %}UNION ALL{% endif %}
-        {% endfor %}
+        WHERE week_no = 18
     ) vd
     LEFT JOIN bift.dim_product f 
         ON vd.pcode = f.pcode
