@@ -107,7 +107,7 @@ WITH non_purchasing AS (
         0                                           AS is_transaction
     FROM (
         SELECT *
-        FROM bift.silver_oa_performance
+        FROM bift.silver_oa_performance_dev
         WHERE is_transaction = 0
           AND tahun          = 2026
     ) s
@@ -218,7 +218,7 @@ purchasing AS (
         1                                           AS is_transaction
     FROM (
         SELECT *
-        FROM bift.silver_oa_performance
+        FROM bift.silver_oa_performance_dev
         WHERE is_transaction = 1
           AND tahun          = 2026
     ) s
