@@ -1,6 +1,12 @@
 {{
     config(
-        materialized='ephemeral'
+        schema='bift',
+        materialized='table',
+        alias='dim_mapping_group_salesforce',
+        indexes=[
+          {'columns': ['source_schema', 'salesforce_id'], 'type': 'btree'},
+          {'columns': ['salesforce_id'], 'type': 'btree'}
+        ]
     )
 }}
 

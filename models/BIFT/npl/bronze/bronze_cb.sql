@@ -126,7 +126,7 @@ WITH customer_with_location AS (
 )
 
 SELECT 
-    dfs.source_schema,
+    sh.source_schema,
     dfs._airbyte_extracted_at,
     dfs.tahun,
     dfs.periode,
@@ -207,9 +207,9 @@ INNER JOIN bift.dim_salesman_hierarchy sh
         OR dfs.tahun < sh.termin_year
         OR (dfs.tahun = sh.termin_year AND dfs.periode <= sh.termin_period)
    )
-LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
+LEFT JOIN bift.dim_mapping_group_salesforce mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
-   AND dfs.source_schema = mmgs.source_schema
+   AND sh.source_schema = mmgs.source_schema
 LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
