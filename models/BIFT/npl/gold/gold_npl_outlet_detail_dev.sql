@@ -107,9 +107,8 @@ WITH non_purchasing AS (
         0                                           AS is_transaction
     FROM (
         SELECT *
-        FROM bift.silver_oa_performance_dev
-        WHERE is_transaction = 0
-          AND tahun          = 2026
+        FROM bift.bronze_cb
+        WHERE tahun = 2026
     ) s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
@@ -218,9 +217,8 @@ purchasing AS (
         1                                           AS is_transaction
     FROM (
         SELECT *
-        FROM bift.silver_oa_performance_dev
-        WHERE is_transaction = 1
-          AND tahun          = 2026
+        FROM bift.silver_oa_transaction
+        WHERE tahun = 2026
     ) s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
