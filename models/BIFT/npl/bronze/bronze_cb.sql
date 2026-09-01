@@ -73,27 +73,38 @@
                 kelurahan_name varchar NULL,
                 latitude varchar NULL,
                 longitude varchar NULL
-            ) PARTITION BY LIST (tahun_periode);
+            ) PARTITION BY RANGE (tahun, periode);
 
             DO $$
             DECLARE
                 y INT;
                 p INT;
-                code INT;
+                y_next INT;
+                p_next INT;
             BEGIN
-                FOR y IN 26..26 LOOP
+                FOR y IN 2026..2026 LOOP
                     FOR p IN 1..12 LOOP
-                        code := y * 100 + p;
-                        EXECUTE format('CREATE TABLE IF NOT EXISTS bift.bronze_cb_p%s PARTITION OF bift.bronze_cb FOR VALUES IN (%s);', code, code);
+                        IF p = 12 THEN
+                            y_next := y + 1;
+                            p_next := 1;
+                        ELSE
+                            y_next := y;
+                            p_next := p + 1;
+                        END IF;
+
+                        EXECUTE format(
+                            'CREATE TABLE IF NOT EXISTS bift.bronze_cb_p%s_%s PARTITION OF bift.bronze_cb FOR VALUES FROM (%s, %s) TO (%s, %s);',
+                            y, LPAD(p::text, 2, '0'), y, p, y_next, p_next
+                        );
                     END LOOP;
                 END LOOP;
                 EXECUTE 'CREATE TABLE IF NOT EXISTS bift.bronze_cb_default PARTITION OF bift.bronze_cb DEFAULT;';
             END $$;
         """,
         indexes=[
-          {'columns': ['tahun_periode', 'distributor_id'], 'type': 'btree'},
-          {'columns': ['periode', 'tahun', 'distributor_id'], 'type': 'btree'},
-          {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'}
+          {'columns': ['tahun', 'periode', 'distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'distributor_id'],                     'type': 'btree'},
+          {'columns': ['distributor_id', 'sls_id', 'cust_id'],                    'type': 'btree'}
         ]
     )
 }}
