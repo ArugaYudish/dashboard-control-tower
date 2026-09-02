@@ -68,7 +68,10 @@ WITH outlet_orders AS (
           (is_transaction = 0 AND (tahun, periode) IN (
               SELECT toUInt16(year), toUInt8(period)
               FROM default.m_cycle3
-              WHERE 1=1 [[ AND {{date}} ]]
+              WHERE (toUInt16(year), toUInt8(period)) IN (
+                  SELECT DISTINCT tahun, periode FROM default.gold_npl_outlet_detail_dev
+              )
+              [[ AND {{date}} ]]
               ORDER BY toUInt16(year) DESC, toUInt8(period) DESC
               LIMIT 1
           ))
@@ -76,7 +79,10 @@ WITH outlet_orders AS (
           (is_transaction = 1 AND (tahun, periode, week) IN (
               SELECT DISTINCT toUInt16(year), toUInt8(period), toUInt8(week)
               FROM default.m_cycle3
-              WHERE 1=1 [[ AND {{date}} ]]
+              WHERE (toUInt16(year), toUInt8(period)) IN (
+                  SELECT DISTINCT tahun, periode FROM default.gold_npl_outlet_detail_dev
+              )
+              [[ AND {{date}} ]]
           ))
       )
 

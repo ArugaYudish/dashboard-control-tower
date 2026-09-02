@@ -16,39 +16,96 @@
     )
 }}
 
+WITH bronze_cb_distinct AS (
+    {% for p in range(5, 6) %}
+    SELECT DISTINCT ON (distributor_id, cust_id, tahun, periode)
+        source_schema,
+        tahun,
+        periode,
+        distributor_id,
+        distributor_nm,
+        cust_id,
+        cust_nm,
+        channel_id,
+        channel_nm,
+        group_channel_id,
+        group_channel_nm,
+        cycle_kunjungan,
+        route,
+        provinsi_code,
+        provinsi_name,
+        kabupaten_code,
+        kabupaten_name,
+        kecamatan_code,
+        kecamatan_name,
+        kelurahan_code,
+        kelurahan_name,
+        latitude,
+        longitude
+    FROM bift.bronze_cb
+    WHERE tahun = 2026
+      AND periode = {{ p }}
+    {% if not loop.last %} UNION ALL {% endif %}
+    {% endfor %}
+),
+
+vd AS (
+    {% for w in range(18, 19) %}
+    SELECT 
+        subdist_id,
+        custno,
+        slsno,
+        slsfc_id,
+        prd_no AS periode,
+        "year" AS tahun,
+        week_no,
+        ord_date,
+        inv_date,
+        inv_no,
+        pcode,
+        inv_qty,
+        inv_val
+    FROM spx.vfsales_det
+    WHERE week_no = {{ w }}
+      AND sts = '905'
+      AND inv_val > 0
+    {% if not loop.last %} UNION ALL {% endif %}
+    {% endfor %}
+)
+
 SELECT 
-    cb.source_schema,
+    COALESCE(sh.source_schema, cb.source_schema) AS source_schema,
     cb.tahun,
     cb.periode,
     vd.week_no::numeric AS week,
     vd.ord_date::date AS date,
     vd.inv_date::date AS inv_date,
-    cb.gdiv_id,
-    cb.gdiv_nm,
-    cb.sd_id,
-    cb.sd_nm,
-    cb.nsm_id,
-    cb.nsm_nm,
-    cb.grsm_id,
-    cb.grsm_nm,
-    cb.rsm_id,
-    cb.rsm_nm,
-    cb.ss_id,
-    cb.ss_nm,
+    sh.gdiv_id,
+    sh.gdiv_nm,
+    sh.sd_id,
+    sh.sd_nm,
+    sh.nsm_id,
+    sh.nsm_nm,
+    sh.grsm_id,
+    sh.grsm_nm,
+    sh.rsm_id,
+    sh.rsm_nm,
+    sh.ss_id,
+    sh.ss_nm,
     cb.distributor_id,
-    cb.distributor_nm,
-    cb.sls_id,
-    cb.sls_nm,
-    cb.gsalesforce1_id,
-    cb.gsalesforce1_nm,
-    cb.gsalesforce2_id,
-    cb.gsalesforce2_nm,
-    cb.salesforce_id,
-    cb.salesforce_nm,
-    cb.salesforce_div_id,
-    cb.salesforce_div_nm,
-    cb.team_id,
-    cb.opr_type,
+    COALESCE(sh.distributor_nm, cb.distributor_nm) AS distributor_nm,
+    vd.slsno AS sls_id,
+    sh.sls_nm,
+    mmgs.gsalesforce1_id,
+    mmgs.gsalesforce1_nm,
+    mmgs.gsalesforce2_id,
+    mmgs.gsalesforce2_nm,
+    COALESCE(sh.salesforce_id, vd.slsfc_id) AS salesforce_id,
+    COALESCE(mmgs.salesforce_nm, sh.salesforce_nm) AS salesforce_nm,
+    sh.salesforce_div_id,
+    sh.salesforce_div_nm,
+    sh.team_id,
+    sh.opr_type,
     cb.cust_id,
     cb.cust_nm,
     cb.channel_id,
@@ -91,22 +148,22 @@ SELECT
     f.sbu_id,
     f.sbu_nm,
     1 AS is_transaction
-FROM (
-    {% for w in range(18, 19) %}
-    SELECT *
-    FROM spx.vfsales_det
-    WHERE week_no = {{ w }}
-      AND sts = '905'
-      AND inv_val > 0
-    {% if not loop.last %} UNION ALL {% endif %}
-    {% endfor %}
-) vd
-INNER JOIN bift.bronze_cb cb 
+FROM vd
+INNER JOIN bronze_cb_distinct cb 
     ON vd.subdist_id = cb.distributor_id
-   AND vd.slsno      = cb.sls_id
    AND vd.custno     = cb.cust_id
-   AND vd.prd_no     = cb.periode
-   AND vd."year"     = cb.tahun
+   AND vd.periode    = cb.periode
+   AND vd.tahun      = cb.tahun
+LEFT JOIN bift.dim_salesman_hierarchy sh 
+    ON vd.subdist_id = sh.distributor_id
+   AND vd.slsno      = sh.sls_id
+   AND (
+        sh.termin_year IS NULL
+        OR cb.tahun < sh.termin_year
+        OR (cb.tahun = sh.termin_year AND cb.periode <= sh.termin_period)
+   )
+LEFT JOIN bift.dim_mapping_group_salesforce mmgs 
+    ON sh.salesforce_id = mmgs.salesforce_id
+   AND sh.source_schema = mmgs.source_schema
 LEFT JOIN bift.dim_product f 
     ON vd.pcode = f.pcode
-WHERE cb.tahun = 2026

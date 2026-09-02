@@ -102,6 +102,7 @@
             END $$;
         """,
         indexes=[
+          {'columns': ['tahun', 'periode', 'distributor_id', 'cust_id'],         'type': 'btree'},
           {'columns': ['tahun', 'periode', 'distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'distributor_id'],                     'type': 'btree'},
           {'columns': ['distributor_id', 'sls_id', 'cust_id'],                    'type': 'btree'}
