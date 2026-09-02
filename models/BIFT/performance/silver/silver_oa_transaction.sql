@@ -154,7 +154,7 @@ INNER JOIN bronze_cb_distinct cb
    AND vd.custno     = cb.cust_id
    AND vd.periode    = cb.periode
    AND vd.tahun      = cb.tahun
-LEFT JOIN bift.dim_salesman_hierarchy sh 
+INNER JOIN bift.dim_salesman_hierarchy sh 
     ON vd.subdist_id = sh.distributor_id
    AND vd.slsno      = sh.sls_id
    AND (
