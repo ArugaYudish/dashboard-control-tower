@@ -1,10 +1,9 @@
 {{
     config(
         schema='bift',
-        materialized='incremental',
+        materialized='table',
         alias='silver_oa_transaction',
         unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode', 'inv_no', 'pcode'],
-        incremental_strategy='delete_insert',
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
           {'columns': ['tahun', 'periode', 'week'],                              'type': 'btree'},
