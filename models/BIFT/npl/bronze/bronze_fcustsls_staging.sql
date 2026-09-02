@@ -109,8 +109,8 @@ SELECT
     dfs.periode,
     dfs.channel_id,
     dfs.channel_nm,
-    dfs.group_channel_id,
-    dfs.group_channel_nm,
+    dgc.group_channel_id,
+    dgc.group_channel_nm,
     dfs.flag_aktif,
     dfs.group_outlet,
     dfs.salesforce_id,
@@ -149,6 +149,9 @@ SELECT
     cwl.latitude,
     cwl.longitude
 FROM {{ ref('dim_fcustsls') }} dfs
+LEFT JOIN {{ ref('dim_group_channel') }} dgc
+    ON dfs.channel_id = dgc.channel_id
+   AND dfs.source_schema = dgc.source_schema
 LEFT JOIN {{ ref('stg_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND dfs.source_schema = mmgs.source_schema

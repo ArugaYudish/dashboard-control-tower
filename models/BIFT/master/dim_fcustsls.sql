@@ -18,8 +18,8 @@ WITH m1_staging AS (
         'm1' AS source_schema,
         f.*,
         gc.channel_nm,
-        gc.group_channel_id,
-        gc.group_channel_nm
+        NULL::varchar AS group_channel_id,
+        NULL::varchar AS group_channel_nm
     FROM raw_ficom_m1.v_fcustsls_staging f
     INNER JOIN (
         SELECT DISTINCT ON (channel_id) *
@@ -48,8 +48,8 @@ m2_staging AS (
         'm2' AS source_schema,
         f.*,
         gc.channel_nm,
-        gc.group_channel_id,
-        gc.group_channel_nm
+        NULL::varchar AS group_channel_id,
+        NULL::varchar AS group_channel_nm
     FROM raw_ficom_m2.v_fcustsls_staging f
     INNER JOIN (
         SELECT DISTINCT ON (channel_id) *
@@ -78,8 +78,8 @@ m3_staging AS (
         'm3' AS source_schema,
         f.*,
         gc.channel_nm,
-        gc.group_channel_id,
-        gc.group_channel_nm
+        NULL::varchar AS group_channel_id,
+        NULL::varchar AS group_channel_nm
     FROM raw_ficom_m3.v_fcustsls_staging f
     INNER JOIN (
         SELECT DISTINCT ON (channel_id) *

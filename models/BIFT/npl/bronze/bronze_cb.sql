@@ -171,8 +171,8 @@ SELECT
     cwl.cust_nm,
     dfs.channel_id,
     dfs.channel_nm,
-    dfs.group_channel_id,
-    dfs.group_channel_nm,
+    dgc.group_channel_id,
+    dgc.group_channel_nm,
     dfs.flag_aktif,
     dfs.group_outlet,
     dfs.salesforce_id,
@@ -218,6 +218,9 @@ INNER JOIN bift.dim_salesman_hierarchy sh
         OR dfs.tahun < sh.termin_year
         OR (dfs.tahun = sh.termin_year AND dfs.periode <= sh.termin_period)
    )
+LEFT JOIN bift.dim_group_channel dgc
+    ON dfs.channel_id = dgc.channel_id
+   AND sh.source_schema = dgc.source_schema
 LEFT JOIN bift.dim_mapping_group_salesforce mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND sh.source_schema = mmgs.source_schema
