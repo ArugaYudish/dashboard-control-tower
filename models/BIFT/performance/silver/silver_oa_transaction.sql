@@ -16,7 +16,7 @@
 }}
 
 WITH bronze_cb_distinct AS (
-    {% for p in range(5, 6) %}
+    {% for p in range(var('periode', 5), var('periode_end', var('periode', 5)) + 1) %}
     SELECT DISTINCT ON (distributor_id, cust_id, tahun, periode)
         source_schema,
         tahun,
@@ -42,14 +42,13 @@ WITH bronze_cb_distinct AS (
         latitude,
         longitude
     FROM bift.bronze_cb
-    WHERE tahun = 2026
-      AND periode = {{ p }}
+    WHERE periode = {{ p }}
     {% if not loop.last %} UNION ALL {% endif %}
     {% endfor %}
 ),
 
 vd AS (
-    {% for w in range(18, 19) %}
+    {% for w in range(var('week_start', 18), var('week_end', var('week_start', 18)) + 1) %}
     SELECT 
         subdist_id,
         custno,

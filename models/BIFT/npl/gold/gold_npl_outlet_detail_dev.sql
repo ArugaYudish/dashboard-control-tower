@@ -240,6 +240,23 @@ purchasing AS (
         s.pcode, s.pcode_nm, s.subbrand_id, s.subbrand_nm
 )
 
-SELECT * FROM non_purchasing
-UNION ALL
-SELECT * FROM purchasing
+SELECT
+    concat_ws('_',
+        COALESCE(is_transaction::text, '0'),
+        COALESCE(source_schema, ''),
+        COALESCE(tahun::text, '0'),
+        COALESCE(periode::text, '0'),
+        COALESCE(week::text, '0'),
+        COALESCE(date::text, '1970-01-01'),
+        COALESCE(distributor_id, ''),
+        COALESCE(cust_id, ''),
+        COALESCE(sls_id, ''),
+        COALESCE(pcode, 'N/A')
+    ) AS row_id,
+    CURRENT_TIMESTAMP AS updated_at,
+    combined.*
+FROM (
+    SELECT * FROM non_purchasing
+    UNION ALL
+    SELECT * FROM purchasing
+) combined
