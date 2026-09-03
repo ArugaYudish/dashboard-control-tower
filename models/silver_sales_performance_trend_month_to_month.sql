@@ -127,4 +127,4 @@ from spx.silver_sales_performance_parent ssp
 group by channel, ssp.year, ssp.period, ssp.periodname,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,
 brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,ssp.distributor_id,distributor_name
 ) a 	
-left join fdis on a.year = fdis.year and a.period = fdis.period and a.parent_id  = fdis.parent_id;
+left join fdis on a.year = fdis.year and a.period = fdis.period and a.parent_id  = fdis.parent_id
