@@ -108,7 +108,8 @@ WITH non_purchasing AS (
     FROM (
         SELECT *
         FROM bift.bronze_cb
-        WHERE tahun = 2026
+        WHERE tahun = {{ var('tahun', 2026) }}
+          AND periode = {{ var('periode', 1) }}
     ) s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
@@ -215,11 +216,7 @@ purchasing AS (
         COALESCE(SUM(s.qty_carton), 0)              AS qty_carton,
         COALESCE(SUM(s.inv_val), 0)                 AS inv_val,
         1                                           AS is_transaction
-    FROM (
-        SELECT *
-        FROM bift.silver_oa_transaction
-        WHERE tahun = 2026
-    ) s
+    FROM bift.silver_oa_transaction s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
           AND s.source_schema = 'm2'
@@ -249,6 +246,7 @@ SELECT
         COALESCE(week::text, '0'),
         COALESCE(date::text, '1970-01-01'),
         COALESCE(distributor_id, ''),
+        COALESCE(ss_id, ''),
         COALESCE(cust_id, ''),
         COALESCE(sls_id, ''),
         COALESCE(pcode, 'N/A')

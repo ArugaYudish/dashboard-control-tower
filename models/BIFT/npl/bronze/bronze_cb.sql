@@ -3,7 +3,7 @@
         schema='bift',
         materialized='incremental',
         alias='bronze_cb',
-        unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
+        unique_key=['distributor_id', 'ss_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
         incremental_strategy='delete+insert',
         pre_hook="""
             CREATE TABLE IF NOT EXISTS bift.bronze_cb (

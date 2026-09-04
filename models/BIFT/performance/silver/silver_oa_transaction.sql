@@ -16,7 +16,7 @@
 }}
 
 WITH bronze_cb_distinct AS (
-    {% for p in range(var('periode', 5), var('periode_end', var('periode', 5)) + 1) %}
+    {% for p in range(var('periode', 1), var('periode_end', var('periode', 1)) + 1) %}
     SELECT DISTINCT ON (distributor_id, cust_id, tahun, periode)
         source_schema,
         tahun,
@@ -42,13 +42,13 @@ WITH bronze_cb_distinct AS (
         latitude,
         longitude
     FROM bift.bronze_cb
-    WHERE periode = {{ p }}
+    WHERE periode = {{ p }} AND tahun = 2026
     {% if not loop.last %} UNION ALL {% endif %}
     {% endfor %}
 ),
 
 vd AS (
-    {% for w in range(var('week_start', 18), var('week_end', var('week_start', 18)) + 1) %}
+    {% for w in range(var('week_start', 1), var('week_end', var('week_start', 1)) + 1) %}
     SELECT 
         subdist_id,
         custno,
@@ -65,6 +65,8 @@ vd AS (
         inv_val
     FROM spx.vfsales_det
     WHERE week_no = {{ w }}
+      AND prd_no = {{ var('periode', 1) }}
+      AND "year" = {{ var('tahun', 2026) }}
       AND sts = '905'
       AND inv_val > 0
     {% if not loop.last %} UNION ALL {% endif %}
@@ -152,9 +154,17 @@ INNER JOIN bronze_cb_distinct cb
    AND vd.custno     = cb.cust_id
    AND vd.periode    = cb.periode
    AND vd.tahun      = cb.tahun
+LEFT JOIN bift.dim_product f 
+    ON vd.pcode = f.pcode
 LEFT JOIN bift.dim_salesman_hierarchy sh 
     ON vd.subdist_id = sh.distributor_id
    AND vd.slsno      = sh.sls_id
+   AND (
+        CASE 
+            WHEN f.gdiv_id IN ('02', '04', '07', '10') THEN '10'
+            ELSE f.gdiv_id
+        END = sh.gdiv_id
+   )
    AND (
         sh.termin_year IS NULL
         OR cb.tahun < sh.termin_year
@@ -163,5 +173,3 @@ LEFT JOIN bift.dim_salesman_hierarchy sh
 LEFT JOIN bift.dim_mapping_group_salesforce mmgs 
     ON sh.salesforce_id = mmgs.salesforce_id
    AND sh.source_schema = mmgs.source_schema
-LEFT JOIN bift.dim_product f 
-    ON vd.pcode = f.pcode
