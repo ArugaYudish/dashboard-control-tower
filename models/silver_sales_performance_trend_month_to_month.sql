@@ -119,12 +119,11 @@ FROM
 (select channel, ssp.year, ssp.period, ssp.periodname,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,
 	ssp.distributor_id,distributor_name,
 	sum(salfo_qty) as salfo_qty, SUM(salfo_value) as salfo_value, SUM(stm_qty) as stm_qty, SUM(stm_value) as stm_value,
-	SUM(fdos_update) as fdos_update, SUM(fdos_value) as fdos_value, SUM(sta_qty) as sta_qty, SUM(sta_value) as sta_value, 
-	SUM(fdos_plan.fdos_plan) as fdos_plan
+	SUM(fdos_update) as fdos_update, SUM(fdos_value) as fdos_value, SUM(sta_qty) as sta_qty, SUM(sta_value) as sta_value	
 from spx.silver_sales_performance_parent ssp 
-	inner join cycle_week cw on ssp.year = cw.year and ssp.period = cw.period and ssp.week = cw.week
-	left join fdos_plan on ssp.year = fdos_plan.year and ssp.period = fdos_plan.period and ssp.parent_id = fdos_plan.parent_id and ssp.distributor_id = fdos_plan.distributor_id
+	inner join cycle_week cw on ssp.year = cw.year and ssp.period = cw.period and ssp.week = cw.week	
 group by channel, ssp.year, ssp.period, ssp.periodname,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,
 brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,ssp.distributor_id,distributor_name
 ) a 	
 left join fdis on a.year = fdis.year and a.period = fdis.period and a.parent_id  = fdis.parent_id
+left join fdos_plan on a.year = fdos_plan.year and a.period = fdos_plan.period and a.parent_id = fdos_plan.parent_id and a.distributor_id = fdos_plan.distributor_id
