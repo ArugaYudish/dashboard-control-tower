@@ -44,7 +44,10 @@ parsed_t_sl_subdist AS (
 calculated_t_sl_subdist AS NOT MATERIALIZED (
   SELECT
     t.*,
-    CASE WHEN t.reason IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal,
+    -- Semua pencocokan kode reason di model ini case-insensitive (sumber kadang
+    -- mengirim 'o' maupun 'O'). Aman karena tidak ada huruf yang dipakai dua kali
+    -- dengan arti berbeda antara versi kecil dan besarnya.
+    CASE WHEN UPPER(t.reason) IN ('F','G','S') THEN t.qty_bill_num ELSE t.so_awal_num END AS calculated_so_awal,
     -- Tahun kalender untuk week_num. Sejak t_sl_subdist punya kolom `year`
     -- (int4 NOT NULL, bagian dari PK bersama `week`), tahun diambil langsung
     -- dari sumber. Sebelumnya nilai ini ditebak dari ket_week + koreksi manual
@@ -62,10 +65,16 @@ cycle_by_date AS (
   FROM spx.m_cycle3
   GROUP BY 1
 ),
+-- reason_id dinormalisasi ke huruf besar supaya lookup group_reason ikut
+-- case-insensitive seperti pencocokan kode reason lainnya. DISTINCT ON menjaga
+-- kuncinya tetap unik: kalau m_reason kebetulan berisi 'o' dan 'O' sekaligus,
+-- join di bawah tidak menggandakan baris fakta.
 reason as (
-select reason_id, reason_nm, group_reason 
+select distinct on (UPPER(reason_id))
+       UPPER(reason_id) AS reason_id_up, reason_nm, group_reason
  from spx.m_reason
 where type_id ='8'
+order by UPPER(reason_id), reason_id
 ),
 results AS (
   SELECT
@@ -83,38 +92,38 @@ results AS (
     ttss.qty_bill_num AS qty_bill, ttss.reason,
     ttss.calculated_so_awal,
     CASE WHEN ttss.reason IS NULL THEN 0 ELSE 1 END AS status_reason,
-    CASE WHEN ttss.reason = 'o' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_o,
-    CASE WHEN ttss.reason = 'M' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_m,
-    CASE WHEN ttss.reason IN ('B','W') AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_b,
-    CASE WHEN ttss.reason = 'Z' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_z,
-    CASE WHEN ttss.reason = 'd' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_d,
-    CASE WHEN ttss.reason = 'T' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_t,
-    CASE WHEN ttss.reason = 'Y' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_y,
-    CASE WHEN ttss.reason = 'A' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_a,
-    CASE WHEN ttss.reason = 'P' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_p,
-    CASE WHEN ttss.reason = 'C' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_c,
-    CASE WHEN ttss.reason = 'F' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_f,
-    CASE WHEN ttss.reason = 'G' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_g,
-    CASE WHEN ttss.reason = 'K' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_k,
-    CASE WHEN ttss.reason = 'S' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_s,
-    CASE WHEN ttss.reason = 'X' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_x,
-    CASE WHEN ttss.reason = 'PPN' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_ppn,
-    CASE WHEN ttss.reason = 'e' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_e,
+    CASE WHEN UPPER(ttss.reason) = 'O' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_o,
+    CASE WHEN UPPER(ttss.reason) = 'M' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_m,
+    CASE WHEN UPPER(ttss.reason) IN ('B','W') AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_b,
+    CASE WHEN UPPER(ttss.reason) = 'Z' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_z,
+    CASE WHEN UPPER(ttss.reason) = 'D' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_d,
+    CASE WHEN UPPER(ttss.reason) = 'T' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_t,
+    CASE WHEN UPPER(ttss.reason) = 'Y' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_y,
+    CASE WHEN UPPER(ttss.reason) = 'A' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_a,
+    CASE WHEN UPPER(ttss.reason) = 'P' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_p,
+    CASE WHEN UPPER(ttss.reason) = 'C' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_c,
+    CASE WHEN UPPER(ttss.reason) = 'F' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_f,
+    CASE WHEN UPPER(ttss.reason) = 'G' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_g,
+    CASE WHEN UPPER(ttss.reason) = 'K' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.so_confirm_num ELSE 0 END AS result_k,
+    CASE WHEN UPPER(ttss.reason) = 'S' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_s,
+    CASE WHEN UPPER(ttss.reason) = 'X' AND ttss.so_confirm_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_x,
+    CASE WHEN UPPER(ttss.reason) = 'PPN' AND ttss.so_confirm_num >= 0 THEN ttss.so_awal_num - ttss.qty_bill_num ELSE 0 END AS result_ppn,
+    CASE WHEN UPPER(ttss.reason) = 'E' AND ttss.qty_bill_num >= 0 THEN ttss.calculated_so_awal - ttss.qty_bill_num ELSE 0 END AS result_e,
     CASE
 	  WHEN ttss.reason IS NULL OR ttss.reason = '' THEN ''
-	  WHEN ttss.reason = 'W' THEN 'B'
+	  WHEN UPPER(ttss.reason) = 'W' THEN 'B'
 	  ELSE ttss.reason
 	END AS new_reason,
     CASE
-	  WHEN ttss.reason = 'U' AND ttss.so_confirm_num >= 0
+	  WHEN UPPER(ttss.reason) = 'U' AND ttss.so_confirm_num >= 0
 	  THEN ttss.calculated_so_awal - ttss.qty_bill_num
 	  ELSE 0
 	END AS result_u,
-	CASE WHEN ttss.reason = 'W' AND ttss.so_confirm_num >= 0
+	CASE WHEN UPPER(ttss.reason) = 'W' AND ttss.so_confirm_num >= 0
      THEN ttss.calculated_so_awal - ttss.qty_bill_num
      ELSE 0
 	END AS result_w,
-	CASE WHEN ttss.reason = 'B' AND ttss.so_confirm_num >= 0
+	CASE WHEN UPPER(ttss.reason) = 'B' AND ttss.so_confirm_num >= 0
      THEN ttss.calculated_so_awal - ttss.qty_bill_num
      ELSE 0
 	END AS result_b_dot,
@@ -171,7 +180,7 @@ SELECT
   t.result_b, t.result_z, t.result_d, t.result_t, t.result_y, t.result_a, t.result_p, t.result_c, 
   t.result_f, t.result_g, t.result_k, t.result_s, t.result_x, t.result_ppn, t.result_e, t.sum_z_ao,
   CASE
-    WHEN t.reason IN ('G','P','S','U')
+    WHEN UPPER(t.reason) IN ('G','P','S','U')
       OR (t.calculated_so_awal - t.so_confirm - t.result_e - t.sum_z_ao) < 0
       OR (t.sum_z_ao + t.result_e) < 0
     THEN 0
@@ -257,7 +266,7 @@ CASE WHEN fc.calculated_keterangan = 'SPO' THEN fc.calculated_so_awal ELSE 0 END
 -- chart-nya dipindah ke year.
 fc.week, fc.year, fc.week_num, fc.week_year
 FROM final_calc fc
- left join reason on fc.reason = reason.reason_id
+ left join reason on UPPER(fc.reason) = reason.reason_id_up
 ),
 -- ============================================================================
 -- avg_last_3_week: rata-rata rasio bill vs SO dari 3 week SEBELUM week baris
