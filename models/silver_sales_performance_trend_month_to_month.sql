@@ -18,10 +18,6 @@ with cycle_week as materialized (
     end as flag,'param' as param
   from spx.m_cycle3
   where year = extract(year from current_date)
-  -- Periode berjalan = periode dari tanggal kalender terakhir yang <= hari ini.
-  -- Bentuk lama `where cdate = current_date` mengembalikan NULL (-> model kosong)
-  -- kalau hari ini tidak ada di m_cycle3, dan error kalau cdate-nya lebih dari
-  -- satu baris. max(...) <= current_date aman untuk kedua kasus.
   and period between 1 and (
         select max(period)
         from spx.m_cycle3
@@ -29,15 +25,6 @@ with cycle_week as materialized (
           and year = extract(year from current_date)
       )
 ),
--- Dari CTE ini yang dipakai hilir cuma parent_id (+ param untuk cross join):
--- div_nm / brand_nm / subbrand_nm / parent_nm tidak pernah diselect di mana pun,
--- jadi 4 LEFT JOIN master dan 8 kolomnya dibuang.
---
--- Efek samping yang disengaja: dulu DISTINCT-nya atas (div, brand, subbrand,
--- parent) sehingga satu parent_id bisa muncul lebih dari sekali kalau parent-nya
--- tersebar di beberapa brand/subbrand -- dan setiap duplikat itu menggandakan
--- baris hasil akhir lewat `left join fdis ... on a.parent_id = fdis.parent_id`.
--- DISTINCT atas parent_id saja menutup celah itu.
 parent_scope as (
   select distinct mp.parent_id, 'param' as param
   from spx.m_product mp
@@ -88,14 +75,13 @@ fdos_plan as
 ),
 fdis_plan as 
 (
-	SELECT h.year, h.period, p.parent_id , sum(qty_final) as fdis_plan
-	FROM spx.t_fdis_marketing_h h 
+	SELECT h.year, h.period, hp.parent_id , sum(qty_final) as fdis_plan
+	FROM spx.t_fdis_marketing_d h 
 	 join cycle_week cw
 	    on cw.year = h.year
-	   and cw.period = h.period  
+	   and cw.week = h.week
 	  left join spx.m_product p
 	    on p.pcode = h.pcode
-	WHERE (h.year * 12 + h.period) = (year_upload * 12 + period_upload) + 1
 	group by h.year, h.period, p.parent_id
 ),
 fdis as (
