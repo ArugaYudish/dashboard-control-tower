@@ -113,7 +113,7 @@ left join fdis_plan  on fdis_plan.parent_id = ph.parent_id
 	and fdis_plan.period = cw.period and fdis_plan.year = cw.year	
 )
 select channel, a.year, a.period, a.periodname, nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
-	sbu_id, sbu_name, brand_id, brand_name, subbrand_id,subbrand_name,a.parent_id,parent_name,flag_sku,distributor_id,distributor_name,
+	sbu_id, sbu_name, brand_id, brand_name, subbrand_id,subbrand_name,a.parent_id,parent_name,flag_sku,a.distributor_id,distributor_name,
 	salfo_qty, salfo_value, stm_qty, stm_value, fdos_update, fdos_value, sta_qty, sta_value, fdis_update, fdis_actual, fdis_plan, fdos_plan
 FROM
 (select channel, ssp.year, ssp.period, ssp.periodname,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,
