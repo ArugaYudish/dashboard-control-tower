@@ -75,14 +75,14 @@ fdos_plan as
 ),
 fdis_plan as 
 (
-	SELECT h.year, h.period, hp.parent_id , sum(qty_final) as fdis_plan
+	SELECT h.year, cw.period, hp.parent_id , sum(qty_final) as fdis_plan
 	FROM spx.t_fdis_marketing_d h 
 	 join cycle_week cw
 	    on cw.year = h.year
 	   and cw.week = h.week
 	  left join spx.m_product p
 	    on p.pcode = h.pcode
-	group by h.year, h.period, p.parent_id
+	group by h.year, cw.period, p.parent_id
 ),
 fdis as (
 select  ph.parent_id, 
