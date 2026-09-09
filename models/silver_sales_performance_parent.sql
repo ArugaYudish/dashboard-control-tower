@@ -1,3 +1,13 @@
+{# post_hook di bawah menandai week berjalan sebagai "sudah masuk BI" begitu model ini
+   selesai dibangun. Ditaruh di model ini, bukan di on-run-end, supaya watermark hanya
+   bergerak kalau data SCCT benar-benar diproses ulang -- `dbt run --select` sebuah model
+   lain tidak boleh terhitung sebagai sinkronisasi.
+
+   Tiap pemanggilan menunjuk relasi sumbernya sendiri, bukan `this`: model ini membawa
+   stm/sta/stock dalam satu tabel di grain pg_id x distributor, sehingga count(*)-nya
+   identik untuk ketiga sumber dan tidak mencerminkan volume sumber mana pun. Hanya STM
+   yang punya kolom timestamp sumber (`upload_date`); v_sta_subdist dan v_stock_dist
+   tidak punya sama sekali. #}
 {{ config(
     materialized='table',
     pre_hook=[
@@ -35,6 +45,11 @@
       {'columns': ['year','period','channel','sbu_name']},
       {'columns': ['year','week','distributor_id','parent_id']},
       {'columns': ['year','channel','period','week','distributor_id','pg_id']}
+    ],
+    post_hook=[
+      refresh_integration_watermark('STM',   'spx.v_omset_subdist_weekly_bw', 'tahun', 'week', 'upload_date'),
+      refresh_integration_watermark('STA',   'spx.v_sta_subdist',             'year',  'week'),
+      refresh_integration_watermark('STOCK', 'spx.v_stock_dist',              'year',  'week')
     ]
 ) }}
 

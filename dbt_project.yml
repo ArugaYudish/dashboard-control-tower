@@ -18,6 +18,12 @@ seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
+# spx.t_bi_integration_watermark menyimpan riwayat kapan tiap week masuk ke BI, jadi ia
+# tidak boleh jadi model dbt (akan di-drop tiap build). Dibuat di sini supaya dijamin ada
+# sebelum post-hook mana pun menulis ke sana. Idempoten (`create table if not exists`).
+on-run-start:
+  - "{{ create_integration_watermark() }}"
+
 seeds:
   dashboard:
     division_group_map:
