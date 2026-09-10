@@ -3,17 +3,16 @@
         schema='bift',
         materialized='table',
         alias='gold_npl_outlet_detail_dev',
-        pre_hook=["set local work_mem = '1GB'"],
         indexes=[
           {'columns': ['tahun', 'periode', 'week', 'distributor_id'], 'type': 'btree'},
-          {'columns': ['tahun', 'periode', 'distributor_id'],         'type': 'btree'},
-          {'columns': ['distributor_id', 'cust_id'],                  'type': 'btree'},
-          {'columns': ['tahun', 'periode', 'pcode'],                  'type': 'btree'},
-          {'columns': ['is_transaction'],                              'type': 'btree'},
-          {'columns': ['sls_id'],                                      'type': 'btree'},
-          {'columns': ['classification_id'],                           'type': 'btree'},
-          {'columns': ['gdiv_id'],                                     'type': 'btree'},
-          {'columns': ['date'],                                        'type': 'btree'}
+          {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
+          {'columns': ['distributor_id', 'cust_id'], 'type': 'btree'},
+          {'columns': ['tahun', 'periode', 'pcode'], 'type': 'btree'},
+          {'columns': ['is_transaction'], 'type': 'btree'},
+          {'columns': ['sls_id'], 'type': 'btree'},
+          {'columns': ['classification_id'], 'type': 'btree'},
+          {'columns': ['gdiv_id'], 'type': 'btree'},
+          {'columns': ['date'], 'type': 'btree'}
         ]
     )
 }}
@@ -23,335 +22,219 @@
 -- Pre-formats all _nm columns as "ID - Name" (or '' if ID is null/empty).
 -- Stream A (non_purchasing): Master CB — 1 row per ALL CB outlets per period (week = NULL, date = NULL).
 -- Stream B (purchasing): 1 row per outlet per product per transaction date (date = s.inv_date, week = s.week).
---
--- Optimization vs original:
---   1. GROUP BY reduced from ~33 cols to ~18 cols — _nm removed, replaced with MAX(_nm).
---      _nm is functionally dependent on _id, so MAX picks the correct (only) value per group.
---   2. Formatting (CASE WHEN NULLIF) moved to wrapper CTEs, not inside GROUP BY.
---   3. Shared cc_lookup CTE pre-computes classification join once for both streams.
---   4. work_mem = 1GB to avoid disk spill during sort.
 
--- ============================================================
--- Shared: pre-compute classification lookup (tiny: ~780 rows)
--- ============================================================
-WITH cc_lookup AS (
+-- Stream A: Master CB — ALL Registered Outlets from Silver OA Performance
+WITH non_purchasing AS (
     SELECT
-        cc.channel_id,
-        cc.classification_id,
-        dc.classification_nm
-    FROM raw_ficom_m2.m_channel_classifications cc
+        COALESCE(s.source_schema, '')                                                   AS source_schema,
+        COALESCE(s.tahun, 0)                                                            AS tahun,
+        COALESCE(s.periode, 0)                                                          AS periode,
+        NULL::numeric                                                                   AS week,
+        NULL::date                                                                      AS date,
+
+        -- Grand Division
+        COALESCE(s.gdiv_id, '')                                                         AS gdiv_id,
+        CASE WHEN NULLIF(s.gdiv_id, '') IS NOT NULL 
+             THEN s.gdiv_id || ' - ' || COALESCE(s.gdiv_nm, '') ELSE '' END            AS gdiv_nm,
+
+        -- Sales Hierarchy
+        COALESCE(s.sd_id, '')                                                           AS sd_id,
+        CASE WHEN NULLIF(s.sd_id, '') IS NOT NULL 
+             THEN s.sd_id || ' - ' || COALESCE(s.sd_nm, '') ELSE '' END                AS sd_nm,
+
+        COALESCE(s.nsm_id, '')                                                          AS nsm_id,
+        CASE WHEN NULLIF(s.nsm_id, '') IS NOT NULL 
+             THEN s.nsm_id || ' - ' || COALESCE(s.nsm_nm, '') ELSE '' END              AS nsm_nm,
+
+        COALESCE(s.grsm_id, '')                                                         AS grsm_id,
+        CASE WHEN NULLIF(s.grsm_id, '') IS NOT NULL 
+             THEN s.grsm_id || ' - ' || COALESCE(s.grsm_nm, '') ELSE '' END            AS grsm_nm,
+
+        COALESCE(s.rsm_id, '')                                                          AS rsm_id,
+        CASE WHEN NULLIF(s.rsm_id, '') IS NOT NULL 
+             THEN s.rsm_id || ' - ' || COALESCE(s.rsm_nm, '') ELSE '' END              AS rsm_nm,
+
+        COALESCE(s.ss_id, '')                                                           AS ss_id,
+        CASE WHEN NULLIF(s.ss_id, '') IS NOT NULL 
+             THEN s.ss_id || ' - ' || COALESCE(s.ss_nm, '') ELSE '' END                AS ss_nm,
+
+        COALESCE(s.distributor_id, '')                                                  AS distributor_id,
+        CASE WHEN NULLIF(s.distributor_id, '') IS NOT NULL 
+             THEN s.distributor_id || ' - ' || COALESCE(s.distributor_nm, '') ELSE '' END AS distributor_nm,
+
+        -- Salesforce
+        COALESCE(s.gsalesforce1_id, '')                                                 AS gsalesforce1_id,
+        CASE WHEN NULLIF(s.gsalesforce1_id, '') IS NOT NULL 
+             THEN s.gsalesforce1_id || ' - ' || COALESCE(s.gsalesforce1_nm, '') ELSE '' END AS gsalesforce1_nm,
+
+        COALESCE(s.gsalesforce2_id, '')                                                 AS gsalesforce2_id,
+        CASE WHEN NULLIF(s.gsalesforce2_id, '') IS NOT NULL 
+             THEN s.gsalesforce2_id || ' - ' || COALESCE(s.gsalesforce2_nm, '') ELSE '' END AS gsalesforce2_nm,
+
+        COALESCE(s.salesforce_id, '')                                                   AS salesforce_id,
+        CASE WHEN NULLIF(s.salesforce_id, '') IS NOT NULL 
+             THEN s.salesforce_id || ' - ' || COALESCE(s.salesforce_nm, '') ELSE '' END AS salesforce_nm,
+
+        -- Salesman, Channel & Outlet
+        COALESCE(s.sls_id, '')                                                          AS sls_id,
+        CASE WHEN NULLIF(s.sls_id, '') IS NOT NULL 
+             THEN s.sls_id || ' - ' || COALESCE(s.sls_nm, '') ELSE '' END              AS sls_nm,
+
+        COALESCE(s.group_channel_id, '')                                                AS group_channel_id,
+        CASE WHEN NULLIF(s.group_channel_id, '') IS NOT NULL 
+             THEN s.group_channel_id || ' - ' || COALESCE(s.group_channel_nm, '') ELSE '' END AS group_channel_nm,
+
+        COALESCE(s.channel_id, '')                                                      AS channel_id,
+        CASE WHEN NULLIF(s.channel_id, '') IS NOT NULL 
+             THEN s.channel_id || ' - ' || COALESCE(s.channel_nm, '') ELSE '' END      AS channel_nm,
+
+        COALESCE(cc.classification_id, '')                                              AS classification_id,
+        CASE WHEN NULLIF(cc.classification_id, '') IS NOT NULL 
+             THEN cc.classification_id || ' - ' || COALESCE(dc.classification_nm, '') ELSE '' END AS classification_nm,
+
+        COALESCE(s.cust_id, '')                                                         AS cust_id,
+        CASE WHEN NULLIF(s.cust_id, '') IS NOT NULL 
+             THEN s.cust_id || ' - ' || COALESCE(s.cust_nm, '') ELSE '' END            AS cust_nm,
+
+        -- Placeholders for non-transacting outlets
+        'N/A'                                       AS pcode,
+        'N/A'                                       AS pcode_nm,
+        'N/A'                                       AS subbrand_id,
+        'N/A'                                       AS subbrand_nm,
+        0                                           AS order_count,
+        0::numeric                                  AS qty_carton,
+        0::numeric                                  AS inv_val,
+        0                                           AS is_transaction
+    FROM (
+        SELECT *
+        FROM bift.bronze_cb
+        WHERE tahun = {{ var('tahun', 2026) }}
+          AND periode = {{ var('periode', 1) }}
+    ) s
+    LEFT JOIN raw_ficom_m2.m_channel_classifications cc
+           ON s.channel_id    = cc.channel_id
+          AND s.source_schema = 'm2'
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
-),
-
--- ============================================================
--- Stream A RAW: GROUP BY ID columns only (not _nm)
--- ~18 cols in GROUP BY vs original ~33 cols
--- ============================================================
-non_purchasing_raw AS (
-    SELECT
-        COALESCE(s.source_schema, '')     AS source_schema,
-        s.tahun,
-        s.periode,
-        -- IDs in GROUP BY
-        COALESCE(s.gdiv_id, '')           AS gdiv_id,
-        COALESCE(s.sd_id, '')             AS sd_id,
-        COALESCE(s.nsm_id, '')            AS nsm_id,
-        COALESCE(s.grsm_id, '')           AS grsm_id,
-        COALESCE(s.rsm_id, '')            AS rsm_id,
-        COALESCE(s.ss_id, '')             AS ss_id,
-        COALESCE(s.distributor_id, '')    AS distributor_id,
-        COALESCE(s.gsalesforce1_id, '')   AS gsalesforce1_id,
-        COALESCE(s.gsalesforce2_id, '')   AS gsalesforce2_id,
-        COALESCE(s.salesforce_id, '')     AS salesforce_id,
-        COALESCE(s.sls_id, '')            AS sls_id,
-        COALESCE(s.group_channel_id, '')  AS group_channel_id,
-        COALESCE(s.channel_id, '')        AS channel_id,
-        COALESCE(cc.classification_id, '') AS classification_id,
-        COALESCE(s.cust_id, '')           AS cust_id,
-        -- _nm via MAX (functionally dependent on _id, same value per group)
-        MAX(s.gdiv_nm)            AS gdiv_nm,
-        MAX(s.sd_nm)              AS sd_nm,
-        MAX(s.nsm_nm)             AS nsm_nm,
-        MAX(s.grsm_nm)            AS grsm_nm,
-        MAX(s.rsm_nm)             AS rsm_nm,
-        MAX(s.ss_nm)              AS ss_nm,
-        MAX(s.distributor_nm)     AS distributor_nm,
-        MAX(s.gsalesforce1_nm)    AS gsalesforce1_nm,
-        MAX(s.gsalesforce2_nm)    AS gsalesforce2_nm,
-        MAX(s.salesforce_nm)      AS salesforce_nm,
-        MAX(s.sls_nm)             AS sls_nm,
-        MAX(s.group_channel_nm)   AS group_channel_nm,
-        MAX(s.channel_nm)         AS channel_nm,
-        MAX(cc.classification_nm) AS classification_nm,
-        MAX(s.cust_nm)            AS cust_nm
-    FROM bift.bronze_cb s
-    LEFT JOIN cc_lookup cc
-           ON s.channel_id    = cc.channel_id
-          AND s.source_schema = 'm2'
-    WHERE s.tahun   = {{ var('tahun', 2026) }}
-      AND s.periode = {{ var('periode', 1) }}
     GROUP BY
-        COALESCE(s.source_schema, ''), s.tahun, s.periode,
-        COALESCE(s.gdiv_id, ''),
-        COALESCE(s.sd_id, ''),
-        COALESCE(s.nsm_id, ''),
-        COALESCE(s.grsm_id, ''),
-        COALESCE(s.rsm_id, ''),
-        COALESCE(s.ss_id, ''),
-        COALESCE(s.distributor_id, ''),
-        COALESCE(s.gsalesforce1_id, ''),
-        COALESCE(s.gsalesforce2_id, ''),
-        COALESCE(s.salesforce_id, ''),
-        COALESCE(s.sls_id, ''),
-        COALESCE(s.group_channel_id, ''),
-        COALESCE(s.channel_id, ''),
+        s.source_schema, s.tahun, s.periode,
+        s.gdiv_id, s.gdiv_nm,
+        s.sd_id, s.sd_nm, s.nsm_id, s.nsm_nm, s.grsm_id, s.grsm_nm,
+        s.rsm_id, s.rsm_nm, s.ss_id, s.ss_nm, s.distributor_id, s.distributor_nm,
+        s.gsalesforce1_id, s.gsalesforce1_nm, s.gsalesforce2_id, s.gsalesforce2_nm,
+        s.salesforce_id, s.salesforce_nm, s.sls_id, s.sls_nm,
+        s.group_channel_id, s.group_channel_nm, s.channel_id, s.channel_nm,
         COALESCE(cc.classification_id, ''),
-        COALESCE(s.cust_id, '')
+        CASE WHEN NULLIF(cc.classification_id, '') IS NOT NULL 
+             THEN cc.classification_id || ' - ' || COALESCE(dc.classification_nm, '') ELSE '' END,
+        s.cust_id, s.cust_nm
 ),
 
--- ============================================================
--- Stream A FORMATTED: apply "ID - Name" formatting post-GROUP BY
--- ============================================================
-non_purchasing AS (
-    SELECT
-        source_schema,
-        COALESCE(tahun, 0)    AS tahun,
-        COALESCE(periode, 0)  AS periode,
-        NULL::numeric         AS week,
-        NULL::date            AS date,
-
-        gdiv_id,
-        CASE WHEN NULLIF(gdiv_id, '') IS NOT NULL
-             THEN gdiv_id || ' - ' || COALESCE(gdiv_nm, '') ELSE '' END         AS gdiv_nm,
-
-        sd_id,
-        CASE WHEN NULLIF(sd_id, '') IS NOT NULL
-             THEN sd_id || ' - ' || COALESCE(sd_nm, '') ELSE '' END             AS sd_nm,
-
-        nsm_id,
-        CASE WHEN NULLIF(nsm_id, '') IS NOT NULL
-             THEN nsm_id || ' - ' || COALESCE(nsm_nm, '') ELSE '' END           AS nsm_nm,
-
-        grsm_id,
-        CASE WHEN NULLIF(grsm_id, '') IS NOT NULL
-             THEN grsm_id || ' - ' || COALESCE(grsm_nm, '') ELSE '' END         AS grsm_nm,
-
-        rsm_id,
-        CASE WHEN NULLIF(rsm_id, '') IS NOT NULL
-             THEN rsm_id || ' - ' || COALESCE(rsm_nm, '') ELSE '' END           AS rsm_nm,
-
-        ss_id,
-        CASE WHEN NULLIF(ss_id, '') IS NOT NULL
-             THEN ss_id || ' - ' || COALESCE(ss_nm, '') ELSE '' END             AS ss_nm,
-
-        distributor_id,
-        CASE WHEN NULLIF(distributor_id, '') IS NOT NULL
-             THEN distributor_id || ' - ' || COALESCE(distributor_nm, '') ELSE '' END AS distributor_nm,
-
-        gsalesforce1_id,
-        CASE WHEN NULLIF(gsalesforce1_id, '') IS NOT NULL
-             THEN gsalesforce1_id || ' - ' || COALESCE(gsalesforce1_nm, '') ELSE '' END AS gsalesforce1_nm,
-
-        gsalesforce2_id,
-        CASE WHEN NULLIF(gsalesforce2_id, '') IS NOT NULL
-             THEN gsalesforce2_id || ' - ' || COALESCE(gsalesforce2_nm, '') ELSE '' END AS gsalesforce2_nm,
-
-        salesforce_id,
-        CASE WHEN NULLIF(salesforce_id, '') IS NOT NULL
-             THEN salesforce_id || ' - ' || COALESCE(salesforce_nm, '') ELSE '' END AS salesforce_nm,
-
-        sls_id,
-        CASE WHEN NULLIF(sls_id, '') IS NOT NULL
-             THEN sls_id || ' - ' || COALESCE(sls_nm, '') ELSE '' END           AS sls_nm,
-
-        group_channel_id,
-        CASE WHEN NULLIF(group_channel_id, '') IS NOT NULL
-             THEN group_channel_id || ' - ' || COALESCE(group_channel_nm, '') ELSE '' END AS group_channel_nm,
-
-        channel_id,
-        CASE WHEN NULLIF(channel_id, '') IS NOT NULL
-             THEN channel_id || ' - ' || COALESCE(channel_nm, '') ELSE '' END   AS channel_nm,
-
-        classification_id,
-        CASE WHEN NULLIF(classification_id, '') IS NOT NULL
-             THEN classification_id || ' - ' || COALESCE(classification_nm, '') ELSE '' END AS classification_nm,
-
-        cust_id,
-        CASE WHEN NULLIF(cust_id, '') IS NOT NULL
-             THEN cust_id || ' - ' || COALESCE(cust_nm, '') ELSE '' END         AS cust_nm,
-
-        'N/A'       AS pcode,
-        'N/A'       AS pcode_nm,
-        'N/A'       AS subbrand_id,
-        'N/A'       AS subbrand_nm,
-        0           AS order_count,
-        0::numeric  AS qty_carton,
-        0::numeric  AS inv_val,
-        0           AS is_transaction
-    FROM non_purchasing_raw
-),
-
--- ============================================================
--- Stream B RAW: GROUP BY ID columns only (not _nm)
--- ~20 cols in GROUP BY vs original ~37 cols
--- ============================================================
-purchasing_raw AS (
-    SELECT
-        COALESCE(s.source_schema, '')     AS source_schema,
-        s.tahun,
-        s.periode,
-        s.week,
-        s.inv_date,
-        -- IDs in GROUP BY
-        COALESCE(s.gdiv_id, '')           AS gdiv_id,
-        COALESCE(s.sd_id, '')             AS sd_id,
-        COALESCE(s.nsm_id, '')            AS nsm_id,
-        COALESCE(s.grsm_id, '')           AS grsm_id,
-        COALESCE(s.rsm_id, '')            AS rsm_id,
-        COALESCE(s.ss_id, '')             AS ss_id,
-        COALESCE(s.distributor_id, '')    AS distributor_id,
-        COALESCE(s.gsalesforce1_id, '')   AS gsalesforce1_id,
-        COALESCE(s.gsalesforce2_id, '')   AS gsalesforce2_id,
-        COALESCE(s.salesforce_id, '')     AS salesforce_id,
-        COALESCE(s.sls_id, '')            AS sls_id,
-        COALESCE(s.group_channel_id, '')  AS group_channel_id,
-        COALESCE(s.channel_id, '')        AS channel_id,
-        COALESCE(cc.classification_id, '') AS classification_id,
-        COALESCE(s.cust_id, '')           AS cust_id,
-        COALESCE(s.pcode, '')             AS pcode,
-        COALESCE(s.subbrand_id, '')       AS subbrand_id,
-        -- _nm via MAX
-        MAX(s.gdiv_nm)            AS gdiv_nm,
-        MAX(s.sd_nm)              AS sd_nm,
-        MAX(s.nsm_nm)             AS nsm_nm,
-        MAX(s.grsm_nm)            AS grsm_nm,
-        MAX(s.rsm_nm)             AS rsm_nm,
-        MAX(s.ss_nm)              AS ss_nm,
-        MAX(s.distributor_nm)     AS distributor_nm,
-        MAX(s.gsalesforce1_nm)    AS gsalesforce1_nm,
-        MAX(s.gsalesforce2_nm)    AS gsalesforce2_nm,
-        MAX(s.salesforce_nm)      AS salesforce_nm,
-        MAX(s.sls_nm)             AS sls_nm,
-        MAX(s.group_channel_nm)   AS group_channel_nm,
-        MAX(s.channel_nm)         AS channel_nm,
-        MAX(cc.classification_nm) AS classification_nm,
-        MAX(s.cust_nm)            AS cust_nm,
-        MAX(s.pcode_nm)           AS pcode_nm,
-        MAX(s.subbrand_nm)        AS subbrand_nm,
-        -- Aggregates
-        COUNT(DISTINCT s.inv_no)        AS order_count,
-        COALESCE(SUM(s.qty_carton), 0)  AS qty_carton,
-        COALESCE(SUM(s.inv_val), 0)     AS inv_val
-    FROM bift.silver_oa_transaction s
-    LEFT JOIN cc_lookup cc
-           ON s.channel_id    = cc.channel_id
-          AND s.source_schema = 'm2'
-    GROUP BY
-        COALESCE(s.source_schema, ''), s.tahun, s.periode, s.week, s.inv_date,
-        COALESCE(s.gdiv_id, ''),
-        COALESCE(s.sd_id, ''),
-        COALESCE(s.nsm_id, ''),
-        COALESCE(s.grsm_id, ''),
-        COALESCE(s.rsm_id, ''),
-        COALESCE(s.ss_id, ''),
-        COALESCE(s.distributor_id, ''),
-        COALESCE(s.gsalesforce1_id, ''),
-        COALESCE(s.gsalesforce2_id, ''),
-        COALESCE(s.salesforce_id, ''),
-        COALESCE(s.sls_id, ''),
-        COALESCE(s.group_channel_id, ''),
-        COALESCE(s.channel_id, ''),
-        COALESCE(cc.classification_id, ''),
-        COALESCE(s.cust_id, ''),
-        COALESCE(s.pcode, ''),
-        COALESCE(s.subbrand_id, '')
-),
-
--- ============================================================
--- Stream B FORMATTED: apply "ID - Name" formatting post-GROUP BY
--- ============================================================
+-- Stream B: Real Transactions from Silver OA Performance
 purchasing AS (
     SELECT
-        source_schema,
-        COALESCE(tahun, 0)    AS tahun,
-        COALESCE(periode, 0)  AS periode,
-        COALESCE(week, 0)     AS week,
-        inv_date              AS date,
+        COALESCE(s.source_schema, '')                                                   AS source_schema,
+        COALESCE(s.tahun, 0)                                                            AS tahun,
+        COALESCE(s.periode, 0)                                                          AS periode,
+        COALESCE(s.week, 0)                                                             AS week,
+        s.inv_date                                                                      AS date,
 
-        gdiv_id,
-        CASE WHEN NULLIF(gdiv_id, '') IS NOT NULL
-             THEN gdiv_id || ' - ' || COALESCE(gdiv_nm, '') ELSE '' END         AS gdiv_nm,
+        -- Grand Division
+        COALESCE(s.gdiv_id, '')                                                         AS gdiv_id,
+        CASE WHEN NULLIF(s.gdiv_id, '') IS NOT NULL 
+             THEN s.gdiv_id || ' - ' || COALESCE(s.gdiv_nm, '') ELSE '' END            AS gdiv_nm,
 
-        sd_id,
-        CASE WHEN NULLIF(sd_id, '') IS NOT NULL
-             THEN sd_id || ' - ' || COALESCE(sd_nm, '') ELSE '' END             AS sd_nm,
+        -- Sales Hierarchy
+        COALESCE(s.sd_id, '')                                                           AS sd_id,
+        CASE WHEN NULLIF(s.sd_id, '') IS NOT NULL 
+             THEN s.sd_id || ' - ' || COALESCE(s.sd_nm, '') ELSE '' END                AS sd_nm,
 
-        nsm_id,
-        CASE WHEN NULLIF(nsm_id, '') IS NOT NULL
-             THEN nsm_id || ' - ' || COALESCE(nsm_nm, '') ELSE '' END           AS nsm_nm,
+        COALESCE(s.nsm_id, '')                                                          AS nsm_id,
+        CASE WHEN NULLIF(s.nsm_id, '') IS NOT NULL 
+             THEN s.nsm_id || ' - ' || COALESCE(s.nsm_nm, '') ELSE '' END              AS nsm_nm,
 
-        grsm_id,
-        CASE WHEN NULLIF(grsm_id, '') IS NOT NULL
-             THEN grsm_id || ' - ' || COALESCE(grsm_nm, '') ELSE '' END         AS grsm_nm,
+        COALESCE(s.grsm_id, '')                                                         AS grsm_id,
+        CASE WHEN NULLIF(s.grsm_id, '') IS NOT NULL 
+             THEN s.grsm_id || ' - ' || COALESCE(s.grsm_nm, '') ELSE '' END            AS grsm_nm,
 
-        rsm_id,
-        CASE WHEN NULLIF(rsm_id, '') IS NOT NULL
-             THEN rsm_id || ' - ' || COALESCE(rsm_nm, '') ELSE '' END           AS rsm_nm,
+        COALESCE(s.rsm_id, '')                                                          AS rsm_id,
+        CASE WHEN NULLIF(s.rsm_id, '') IS NOT NULL 
+             THEN s.rsm_id || ' - ' || COALESCE(s.rsm_nm, '') ELSE '' END              AS rsm_nm,
 
-        ss_id,
-        CASE WHEN NULLIF(ss_id, '') IS NOT NULL
-             THEN ss_id || ' - ' || COALESCE(ss_nm, '') ELSE '' END             AS ss_nm,
+        COALESCE(s.ss_id, '')                                                           AS ss_id,
+        CASE WHEN NULLIF(s.ss_id, '') IS NOT NULL 
+             THEN s.ss_id || ' - ' || COALESCE(s.ss_nm, '') ELSE '' END                AS ss_nm,
 
-        distributor_id,
-        CASE WHEN NULLIF(distributor_id, '') IS NOT NULL
-             THEN distributor_id || ' - ' || COALESCE(distributor_nm, '') ELSE '' END AS distributor_nm,
+        COALESCE(s.distributor_id, '')                                                  AS distributor_id,
+        CASE WHEN NULLIF(s.distributor_id, '') IS NOT NULL 
+             THEN s.distributor_id || ' - ' || COALESCE(s.distributor_nm, '') ELSE '' END AS distributor_nm,
 
-        gsalesforce1_id,
-        CASE WHEN NULLIF(gsalesforce1_id, '') IS NOT NULL
-             THEN gsalesforce1_id || ' - ' || COALESCE(gsalesforce1_nm, '') ELSE '' END AS gsalesforce1_nm,
+        -- Salesforce
+        COALESCE(s.gsalesforce1_id, '')                                                 AS gsalesforce1_id,
+        CASE WHEN NULLIF(s.gsalesforce1_id, '') IS NOT NULL 
+             THEN s.gsalesforce1_id || ' - ' || COALESCE(s.gsalesforce1_nm, '') ELSE '' END AS gsalesforce1_nm,
 
-        gsalesforce2_id,
-        CASE WHEN NULLIF(gsalesforce2_id, '') IS NOT NULL
-             THEN gsalesforce2_id || ' - ' || COALESCE(gsalesforce2_nm, '') ELSE '' END AS gsalesforce2_nm,
+        COALESCE(s.gsalesforce2_id, '')                                                 AS gsalesforce2_id,
+        CASE WHEN NULLIF(s.gsalesforce2_id, '') IS NOT NULL 
+             THEN s.gsalesforce2_id || ' - ' || COALESCE(s.gsalesforce2_nm, '') ELSE '' END AS gsalesforce2_nm,
 
-        salesforce_id,
-        CASE WHEN NULLIF(salesforce_id, '') IS NOT NULL
-             THEN salesforce_id || ' - ' || COALESCE(salesforce_nm, '') ELSE '' END AS salesforce_nm,
+        COALESCE(s.salesforce_id, '')                                                   AS salesforce_id,
+        CASE WHEN NULLIF(s.salesforce_id, '') IS NOT NULL 
+             THEN s.salesforce_id || ' - ' || COALESCE(s.salesforce_nm, '') ELSE '' END AS salesforce_nm,
 
-        sls_id,
-        CASE WHEN NULLIF(sls_id, '') IS NOT NULL
-             THEN sls_id || ' - ' || COALESCE(sls_nm, '') ELSE '' END           AS sls_nm,
+        -- Salesman, Channel & Outlet
+        COALESCE(s.sls_id, '')                                                          AS sls_id,
+        CASE WHEN NULLIF(s.sls_id, '') IS NOT NULL 
+             THEN s.sls_id || ' - ' || COALESCE(s.sls_nm, '') ELSE '' END              AS sls_nm,
 
-        group_channel_id,
-        CASE WHEN NULLIF(group_channel_id, '') IS NOT NULL
-             THEN group_channel_id || ' - ' || COALESCE(group_channel_nm, '') ELSE '' END AS group_channel_nm,
+        COALESCE(s.group_channel_id, '')                                                AS group_channel_id,
+        CASE WHEN NULLIF(s.group_channel_id, '') IS NOT NULL 
+             THEN s.group_channel_id || ' - ' || COALESCE(s.group_channel_nm, '') ELSE '' END AS group_channel_nm,
 
-        channel_id,
-        CASE WHEN NULLIF(channel_id, '') IS NOT NULL
-             THEN channel_id || ' - ' || COALESCE(channel_nm, '') ELSE '' END   AS channel_nm,
+        COALESCE(s.channel_id, '')                                                      AS channel_id,
+        CASE WHEN NULLIF(s.channel_id, '') IS NOT NULL 
+             THEN s.channel_id || ' - ' || COALESCE(s.channel_nm, '') ELSE '' END      AS channel_nm,
 
-        classification_id,
-        CASE WHEN NULLIF(classification_id, '') IS NOT NULL
-             THEN classification_id || ' - ' || COALESCE(classification_nm, '') ELSE '' END AS classification_nm,
+        COALESCE(cc.classification_id, '')                                              AS classification_id,
+        CASE WHEN NULLIF(cc.classification_id, '') IS NOT NULL 
+             THEN cc.classification_id || ' - ' || COALESCE(dc.classification_nm, '') ELSE '' END AS classification_nm,
 
-        cust_id,
-        CASE WHEN NULLIF(cust_id, '') IS NOT NULL
-             THEN cust_id || ' - ' || COALESCE(cust_nm, '') ELSE '' END         AS cust_nm,
+        COALESCE(s.cust_id, '')                                                         AS cust_id,
+        CASE WHEN NULLIF(s.cust_id, '') IS NOT NULL 
+             THEN s.cust_id || ' - ' || COALESCE(s.cust_nm, '') ELSE '' END            AS cust_nm,
 
-        pcode,
-        CASE WHEN NULLIF(pcode, '') IS NOT NULL
-             THEN pcode || ' - ' || COALESCE(pcode_nm, '') ELSE '' END          AS pcode_nm,
+        -- Product Detail
+        COALESCE(s.pcode, '')                                                           AS pcode,
+        CASE WHEN NULLIF(s.pcode, '') IS NOT NULL 
+             THEN s.pcode || ' - ' || COALESCE(s.pcode_nm, '') ELSE '' END             AS pcode_nm,
 
-        subbrand_id,
-        CASE WHEN NULLIF(subbrand_id, '') IS NOT NULL
-             THEN subbrand_id || ' - ' || COALESCE(subbrand_nm, '') ELSE '' END AS subbrand_nm,
+        COALESCE(s.subbrand_id, '')                                                     AS subbrand_id,
+        CASE WHEN NULLIF(s.subbrand_id, '') IS NOT NULL 
+             THEN s.subbrand_id || ' - ' || COALESCE(s.subbrand_nm, '') ELSE '' END    AS subbrand_nm,
 
-        order_count,
-        qty_carton,
-        inv_val,
-        1 AS is_transaction
-    FROM purchasing_raw
+        COUNT(DISTINCT s.inv_no)                    AS order_count,
+        COALESCE(SUM(s.qty_carton), 0)              AS qty_carton,
+        COALESCE(SUM(s.inv_val), 0)                 AS inv_val,
+        1                                           AS is_transaction
+    FROM bift.silver_oa_transaction s
+    LEFT JOIN raw_ficom_m2.m_channel_classifications cc
+           ON s.channel_id    = cc.channel_id
+          AND s.source_schema = 'm2'
+    LEFT JOIN bift.dim_classifications dc
+           ON cc.classification_id = dc.classification_id
+    GROUP BY
+        s.source_schema, s.tahun, s.periode, s.week, s.inv_date,
+        s.gdiv_id, s.gdiv_nm,
+        s.sd_id, s.sd_nm, s.nsm_id, s.nsm_nm, s.grsm_id, s.grsm_nm,
+        s.rsm_id, s.rsm_nm, s.ss_id, s.ss_nm, s.distributor_id, s.distributor_nm,
+        s.gsalesforce1_id, s.gsalesforce1_nm, s.gsalesforce2_id, s.gsalesforce2_nm,
+        s.salesforce_id, s.salesforce_nm, s.sls_id, s.sls_nm,
+        s.group_channel_id, s.group_channel_nm, s.channel_id, s.channel_nm,
+        COALESCE(cc.classification_id, ''),
+        CASE WHEN NULLIF(cc.classification_id, '') IS NOT NULL 
+             THEN cc.classification_id || ' - ' || COALESCE(dc.classification_nm, '') ELSE '' END,
+        s.cust_id, s.cust_nm,
+        s.pcode, s.pcode_nm, s.subbrand_id, s.subbrand_nm
 )
 
 SELECT
