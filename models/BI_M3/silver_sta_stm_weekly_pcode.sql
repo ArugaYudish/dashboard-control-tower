@@ -73,7 +73,7 @@ m_product_clean as (
         pcode,
         div_id,
         sls_div,      -- Dipanggil jika memang ada di m_product
-        pcode_nm      -- Sesuaikan nama kolom deskripsi/nama produk (misal: pcode_nm / product_name)
+        pcodename      -- Sesuaikan nama kolom deskripsi/nama produk (misal: pcode_nm / product_name)
     from spx.m_product
     order by pcode
 )
