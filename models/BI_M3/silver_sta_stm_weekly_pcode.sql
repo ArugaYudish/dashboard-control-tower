@@ -90,7 +90,7 @@ select
     coalesce(sta.pcode, stm.pcode) as pcode,
     
     -- Atribut dari m_product
-    mp.pcode_nm as pcode_name,
+    mp.pcodename as pcodename,
     mp.div_id,
     mp.sls_div,
     
