@@ -65,9 +65,20 @@ sta_summary as (
         sum(sta_value) as sta_val
     from sta_raw
     group by 1, 2, 3, 4
+),
+
+-- 5. Menyiapkan Master Product Unik (Mencegah Duplikasi Row saat Join)
+m_product_clean as (
+    select distinct on (pcode)
+        pcode,
+        div_id,
+        sls_div,      -- Dipanggil jika memang ada di m_product
+        pcode_nm      -- Sesuaikan nama kolom deskripsi/nama produk (misal: pcode_nm / product_name)
+    from spx.m_product
+    order by pcode
 )
 
--- 5. Final Join
+-- 6. Final Join (Fakta STA/STM + Dimensi Product)
 select 
     coalesce(sta.year, stm.year) as year,
     coalesce(sta.week, stm.week) as week,
@@ -78,6 +89,12 @@ select
     coalesce(sta.distributor_id, stm.distributor_id) as distributor_id,
     coalesce(sta.pcode, stm.pcode) as pcode,
     
+    -- Atribut dari m_product
+    mp.pcode_nm as pcode_name,
+    mp.div_id,
+    mp.sls_div,
+    
+    -- Metrik Qty dan Value
     coalesce(sta.sta_qty, 0) as sta_qty,
     coalesce(stm.stm_qty, 0) as stm_qty,
     coalesce(sta.sta_val, 0) as sta_val,
@@ -91,3 +108,5 @@ full outer join stm_summary stm
     and sta.week           = stm.week 
     and sta.distributor_id = stm.distributor_id 
     and sta.pcode          = stm.pcode
+left join m_product_clean mp
+    on coalesce(sta.pcode, stm.pcode) = mp.pcode
