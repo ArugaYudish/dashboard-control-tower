@@ -1,7 +1,11 @@
 {{
     config(
-        materialized='view',
-        alias='v_monitoring_closing_subdist_weekly'
+        materialized='table',
+        alias='v_monitoring_closing_subdist_weekly',
+        indexes=[
+          {'columns': ['year', 'week']},
+          {'columns': ['distributor_id']}
+        ]
     )
 }}
 
@@ -20,8 +24,14 @@
 -- BATASAN YANG DITERIMA SADAR: spx.m_ho_subdist adalah master state terkini (PK subdist_id,
 -- tanpa kolom year/week), jadi evaluasi ini hanya sahih untuk week terkini. Untuk week yang
 -- sudah lama lewat, `next_date > Sabtu W-1` otomatis benar sehingga angkanya cenderung
--- mendekati 100% dan berubah tiap hari. Kalau angka historis dibutuhkan, jalan keluarnya
--- tabel snapshot mingguan dengan pola penguncian yang sama seperti t_bi_integration_watermark.
+-- mendekati 100%. Kalau angka historis dibutuhkan, jalan keluarnya tabel snapshot mingguan
+-- dengan pola penguncian yang sama seperti t_bi_integration_watermark.
+--
+-- Materialized sebagai TABLE, bukan view: angkanya membeku di waktu `dbt run` terakhir, tidak
+-- dihitung ulang tiap chart dibuka. Konsekuensinya user melihat kondisi saat build, bukan
+-- kondisi saat itu -- relevan karena kartu ini hanya menunjukkan angka campuran pada Senin
+-- pagi, ketika sebagian subdist belum melewati Sabtu W-1. Imbalannya query chart tidak lagi
+-- menghitung ulang kalender dan filter subdist setiap kali dibuka.
 
 {# Stream Airbyte logistic.m_ho_subdist -> spx.m_ho_subdist belum dibuat. Selama tabelnya
    belum ada, view tetap terbangun dengan stub kosong supaya `dbt build` tidak gagal; query
@@ -84,25 +94,20 @@ active_subdist as (
            null::date    as upd_date
     where false
 {%- endif %}
-),
-coverage as (
-    -- v_sales_hierarchy memetakan distributor -> ss/rsm/grsm/nsm secara langsung.
-    -- Satu distributor bisa berada di bawah lebih dari satu ss (1.535 baris untuk 1.061
-    -- distributor), jadi chart WAJIB memakai count(distinct distributor_id), bukan count(*).
-    select distinct distributor_id, ss_id, rsm_id, grsm_id, nsm_id
-    from spx.v_sales_hierarchy
 )
 
--- Chart Superset (satu virtual dataset untuk kartu "Completion Rate Subdist"):
+-- Grain: satu baris per (filter week, subdist aktif). Tidak ada hierarki sales di sini --
+-- pemetaan distributor -> ss/rsm/grsm/nsm sengaja ditinggalkan untuk dikerjakan di virtual
+-- dataset Superset, supaya model ini tetap menjadi fakta closing yang bersih.
 --
---   select count(distinct distributor_id) filter (where closed_flag = 1) as closed,
---          count(distinct distributor_id)                                as total,
---          round(100.0 * count(distinct distributor_id) filter (where closed_flag = 1)
---                / nullif(count(distinct distributor_id), 0), 0)         as pct
---   from spx.v_monitoring_closing_subdist_weekly
---   where year = {{ "{{ url_param('year') }}" }}::int
---     and week = {{ "{{ url_param('week') }}" }}::int
---     and ss_id in ( ...url_param('ssId') dipecah dari CSV... )
+-- Konsekuensinya penyaringan "coveran user" HARUS dilakukan di sisi Superset dengan menjoin
+-- spx.v_sales_hierarchy (kolom distributor_id) lalu memfilter ss_id. Tanpa join itu, kartu
+-- menampilkan seluruh subdist aktif secara nasional, bukan coveran user.
+--
+-- Karena hierarki tidak lagi ikut, tidak ada penggandaan baris: satu subdist muncul tepat
+-- sekali per week. count(*) jadi aman di sini. Tapi begitu v_sales_hierarchy dijoin di
+-- Superset, penggandaan itu kembali muncul (satu distributor bisa di bawah >1 ss, 1.535
+-- baris untuk 1.061 distributor) -- di sana count(distinct distributor_id) tetap wajib.
 select t.filter_year as year,
        t.filter_week as week,
        -- Week yang sebenarnya dievaluasi (W-1) beserta tanggal Sabtunya, supaya angka di
@@ -110,16 +115,8 @@ select t.filter_year as year,
        t.eval_year,
        t.eval_week,
        t.sabtu_date,
-       c.ss_id,
-       c.rsm_id,
-       c.grsm_id,
-       c.nsm_id,
        a.distributor_id,
        a.distributor_nm,
-       -- m_ho_subdist tidak membawa channel, sedangkan dashboard punya filter channel.
-       -- Dijoin lewat m_distributor.distributor_id_mtx, bukan distributor_id: id subdist
-       -- dari HO berada di ruang id mtx.
-       md.sls_div as channel,
        -- Ketiganya diekspos supaya angka di dashboard bisa ditelusuri balik per subdist.
        -- upd_date ikut dibawa untuk diagnosa, tapi tidak dipakai menghitung closed_flag.
        a.ext_date,
@@ -130,5 +127,3 @@ select t.filter_year as year,
             then 1 else 0 end as closed_flag
 from target t
 cross join active_subdist a
-join coverage c on c.distributor_id = a.distributor_id
-left join spx.m_distributor md on md.distributor_id_mtx = a.distributor_id
