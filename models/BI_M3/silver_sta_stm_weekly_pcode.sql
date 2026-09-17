@@ -13,7 +13,7 @@ with stm_summary as (
         pcode,
         sum(omsetqty) as stm_qty,
         sum(omsetvalue) as stm_val
-    from {{ ref('v_omset_subdist_weekly_bw') }}
+    from spx.v_omset_subdist_weekly_bw -- Ganti ref() jadi nama tabel langsung
     group by 1, 2, 3, 4
 ),
 
@@ -25,19 +25,17 @@ sta_summary as (
         pcode,
         sum(sta_qty) as sta_qty,
         sum(sta_value) as sta_val
-    from {{ ref('v_sta_subdist') }}
+    from spx.v_sta_subdist -- Ganti ref() jadi nama tabel langsung
     group by 1, 2, 3, 4
 )
 
 select 
     coalesce(sta.year, stm.year) as year,
     coalesce(sta.week, stm.week) as week,
-    -- Format tampilan Week.Year (contoh: 34.2025)
     lpad(coalesce(sta.week, stm.week)::text, 2, '0') || '.' || coalesce(sta.year, stm.year)::text as week_year,
     coalesce(sta.distributor_id, stm.distributor_id) as distributor_id,
     coalesce(sta.pcode, stm.pcode) as pcode,
     
-    -- Metrik STA & STM
     coalesce(sta.sta_qty, 0) as sta_qty,
     coalesce(stm.stm_qty, 0) as stm_qty,
     coalesce(sta.sta_val, 0) as sta_val,
