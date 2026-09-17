@@ -117,6 +117,8 @@ select t.filter_year as year,
        a.distributor_id,
        a.distributor_nm,
        -- m_ho_subdist tidak membawa channel, sedangkan dashboard punya filter channel.
+       -- Dijoin lewat m_distributor.distributor_id_mtx, bukan distributor_id: id subdist
+       -- dari HO berada di ruang id mtx.
        md.sls_div as channel,
        -- Ketiganya diekspos supaya angka di dashboard bisa ditelusuri balik per subdist.
        -- upd_date ikut dibawa untuk diagnosa, tapi tidak dipakai menghitung closed_flag.
@@ -129,4 +131,4 @@ select t.filter_year as year,
 from target t
 cross join active_subdist a
 join coverage c on c.distributor_id = a.distributor_id
-left join spx.m_distributor md on md.distributor_id = a.distributor_id
+left join spx.m_distributor md on md.distributor_id_mtx = a.distributor_id
