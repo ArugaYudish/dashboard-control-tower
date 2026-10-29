@@ -29,10 +29,11 @@ WITH open_weeks AS (
 ),
 
 scoped AS (
-    -- Minggu yang SUDAH tutup: semua baris ikut apa adanya, tanpa gerbang.
-    -- Slice yang punya salfo tapi tidak menjual apa pun adalah forecast miss
-    -- yang sebenarnya, jadi harus tetap menekan FA. Menyaringnya justru
-    -- menaikkan FA secara semu.
+    -- Minggu yang SUDAH tutup: tanpa gerbang minggu, tetapi baris dengan
+    -- stm = 0/NULL dibuang (lihat filter di bawah). Catatan: versi sebelumnya
+    -- sengaja mempertahankan baris itu karena salfo tanpa penjualan adalah
+    -- forecast miss yang sebenarnya; menyaringnya menaikkan FA (~0,7 poin pada
+    -- 2026 P10). Dibuang sekarang agar angka sama dengan chart line.
     SELECT s.year, s.period, s.channel,
            s.nsm_id, s.nsm_name, s.grsm_id, s.grsm_name,
            s.rsm_id, s.rsm_name, s.ss_id, s.ss_name,
@@ -45,6 +46,10 @@ scoped AS (
         SELECT 1 FROM open_weeks ow
         WHERE ow.year = s.year AND ow.week = s.week
     )
+    -- Baris tanpa penjualan (stm = 0 atau NULL) dibuang, menyamakan dengan
+    -- chart line Performance Trend. Konsekuensinya salfo pada slice yang tidak
+    -- menjual apa pun tidak lagi menekan FA; total_actual tidak berubah.
+    AND COALESCE(s.stm_qty, 0) <> 0
 
     UNION ALL
 
@@ -85,6 +90,7 @@ scoped AS (
         )
     ) t
     WHERE t.slice_week_stm IS NOT NULL
+      AND COALESCE(t.stm_qty, 0) <> 0
 ),
 
 agg AS (
