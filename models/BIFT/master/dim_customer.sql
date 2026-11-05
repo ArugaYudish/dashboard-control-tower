@@ -13,7 +13,7 @@
 
 select
     *
-from raw_ho.v_fcustmst
+from raw_ho.fcustmst
 where custno is not null 
   and subdist_id is not null
 {% if is_incremental() %}
