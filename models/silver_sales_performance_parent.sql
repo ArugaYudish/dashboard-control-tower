@@ -75,15 +75,42 @@ with cycle_ranked as (
                  and extract(year from current_date)
   group by year, week, period
 ),
+-- The week the calendar is in right now. min(rn) because a week straddling two periods has
+-- two rows in cycle_ranked and both of them are current. An aggregate with no GROUP BY always
+-- returns exactly one row, so the cross join below cannot fan out; if no week has started yet
+-- rn is NULL, which falls through to the W-2 branch.
+current_week as (
+  select min(cr.rn) as rn
+  from cycle_ranked cr
+  join (
+    select year, week
+    from cycle_ranked
+    where week_start::date <= current_date
+    order by week_start desc
+    limit 1
+  ) c on c.year = cr.year and c.week = cr.week
+),
+-- Last source week of each target week's rolling averages (requirement "Last 5W"):
+--   past week              -> W-1: by now that week has closed.
+--   current / future week  -> W-2: W-1 may not have closed yet at the start of the week.
+-- Decided from the system date, never from the dashboard's week filter. So the current week
+-- and the week before it share one window, and a week's averages move once more when it stops
+-- being current (the table is rebuilt on every run).
+week_cutoff as (
+  select w.year, w.week,
+         w.rn - case when w.rn < cw.rn then 1 else 2 end as cutoff_rn
+  from cycle_ranked w
+  cross join current_week cw
+),
 -- For every target week, list the source weeks feeding its rolling averages:
--- 5w window = rn-6..rn-2, 13w window = rn-14..rn-2 (current and previous week excluded).
+-- 5w window = cutoff-4..cutoff, 13w window = cutoff-12..cutoff.
 week_windows as (
   select w.year, w.week,
          src.year as src_year, src.week as src_week,
-         (src.rn between w.rn - 6  and w.rn - 2) as in_5w,
-         (src.rn between w.rn - 14 and w.rn - 2) as in_13w
-  from cycle_ranked w
-  join cycle_ranked src on src.rn between w.rn - 14 and w.rn - 2
+         (src.rn between w.cutoff_rn - 4  and w.cutoff_rn) as in_5w,
+         (src.rn between w.cutoff_rn - 12 and w.cutoff_rn) as in_13w
+  from week_cutoff w
+  join cycle_ranked src on src.rn between w.cutoff_rn - 12 and w.cutoff_rn
 ),
 window_counts as (
   select year, week,
