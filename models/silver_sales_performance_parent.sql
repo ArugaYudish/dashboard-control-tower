@@ -185,8 +185,21 @@ stock as (
 	(
 	select vss.year, vss.week, vss.sub_id as distributor_id, vss.pcode, pg.pg_id, vss.qty, (vss.qty * mp.price) as qty_value, vss.git_qty, (vss.git_qty * mp.price) as git_value
 	 from spx.v_stock_dist vss inner join cycle_ranked cr on vss.year = cr.year and vss.week = cr.week join pcode_pg pg on vss.pcode = pg.pcode
+			join pg_dim d on d.pg_id = pg.pg_id
 			left join spx.m_distributor md on vss.sub_id = md.distributor_id
+			left join {{ ref('division_group_map') }} dg on dg.div_id = d.div_id
 			left join spx.m_price_divisi mp on vss.year = mp.year and md.sls_div = mp.sls_div and vss.pcode = mp.pcode
+	 -- Guard divisi: subdist M1 / M245 / M3 hanya boleh membawa stock & GIT dari divisi
+	 -- produknya sendiri. Baris nyasar dari sumber (upload salah, fallback mapping) dibuang
+	 -- di sini supaya tidak muncul di dashboard. Divisi distributor lain (MT, INS, NULL)
+	 -- tidak dijaga. div_id yang belum ada di seed division_group_map ikut terbuang untuk
+	 -- subdist M1/M245/M3 -- tambahkan ke seed kalau ada divisi produk baru.
+	 where coalesce(md.divisi, '') not in ('M1', 'M245', 'M3')
+	    or md.divisi = case
+	                     when dg.m_group = 'M1'                   then 'M1'
+	                     when dg.m_group in ('M2', 'M4', 'M5')    then 'M245'
+	                     when dg.m_group = 'M3'                   then 'M3'
+	                   end
 	) a
 	group by a.year, a.week, a.distributor_id, a.pg_id
 ),
