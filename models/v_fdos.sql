@@ -21,7 +21,7 @@ with sl as (
 
 src as (
   select
-    f.week::int || '_' || f.year::int as week_year,
+    f.week::int || '.' || f.year::int as week_year,
     f.sub_id                  as distributor_id,
     f.pcode,
     mp.div_id                 as sbu_id,
@@ -40,7 +40,7 @@ src as (
   union all
 
   select
-    u.week::int || '_' || u.year::int,
+    u.week::int || '.' || u.year::int,
     u.distributor_id,
     u.pcode,
     mp.div_id,
@@ -55,7 +55,7 @@ src as (
   union all
 
   select
-    sl.week || '_' || sl.year,
+    sl.week || '.' || sl.year,
     sl.distributor_id,
     sl.pcode,
     sl.sbu_id,
@@ -72,6 +72,7 @@ src as (
 select
   week_year,
   distributor_id,
+  distributor_id::text || '.' || sbu_id::text as dist_sbu,   -- sbu_id = m_product.div_id; same format as logistic.v_salfo_confirm
   pcode,
   sbu_id,
   sum(fdosplan_qty)   as fdosplan_qty,
