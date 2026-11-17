@@ -1,8 +1,55 @@
+{%- set v_tahun = var('tahun', none) -%}
+{%- set v_periode = var('periode', none) -%}
+{%- set v_periode_end = var('periode_end', v_periode) -%}
+{%- set v_all_periods = var('all_periods', false) -%}
+{%- set v_lookback_days = var('lookback_days', 35) | int -%}
+
+{%- set ns = namespace(
+    filter_periods=true,
+    period_pairs=[],
+    ypw_triples=[]
+) -%}
+
+{%- if v_all_periods -%}
+    {%- set ns.filter_periods = false -%}
+{%- elif v_tahun is not none and v_periode is not none -%}
+    {%- set y = v_tahun | int -%}
+    {%- for p in range(v_periode | int, (v_periode_end | int) + 1) -%}
+        {%- set ns.period_pairs = ns.period_pairs + [(y, p)] -%}
+    {%- endfor -%}
+{%- elif execute -%}
+    {%- set cycle_sql -%}
+        SELECT DISTINCT year::int AS tahun, period::int AS periode, week::int AS week_no
+        FROM spx.m_cycle3
+        WHERE cdate::date BETWEEN (CURRENT_DATE - INTERVAL '{{ v_lookback_days }} days')::date AND CURRENT_DATE
+        ORDER BY 1, 2, 3
+    {%- endset -%}
+    {%- set cycle_res = run_query(cycle_sql) -%}
+    {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
+        {%- for row in cycle_res.rows -%}
+            {%- set r_y = row[0] | int -%}
+            {%- set r_p = row[1] | int -%}
+            {%- set r_w = row[2] | int -%}
+            {%- if (r_y, r_p) not in ns.period_pairs -%}
+                {%- set ns.period_pairs = ns.period_pairs + [(r_y, r_p)] -%}
+            {%- endif -%}
+            {%- set ns.ypw_triples = ns.ypw_triples + [(r_y, r_p, r_w)] -%}
+        {%- endfor -%}
+    {%- else -%}
+        {%- set ns.filter_periods = false -%}
+    {%- endif -%}
+{%- else -%}
+    {%- set ns.period_pairs = [(2026, 1)] -%}
+{%- endif -%}
+
 {{
     config(
         schema='bift',
         materialized='table',
-        alias='gold_npl_v2'
+        alias='gold_npl_v2',
+        pre_hook=[
+            "SET LOCAL work_mem = '256MB'"
+        ]
     )
 }}
 
@@ -95,8 +142,13 @@ WITH non_purchasing AS (
     FROM (
         SELECT *
         FROM bift.bronze_cb
-        WHERE tahun = {{ var('tahun', 2026) }}
-          AND periode = {{ var('periode', 1) }}
+        {% if ns.filter_periods and (ns.period_pairs | length) > 0 %}
+        WHERE (tahun, periode) IN (
+            {%- for pair in ns.period_pairs -%}
+            ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+            {%- endfor -%}
+        )
+        {% endif %}
     ) s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
@@ -217,6 +269,21 @@ purchasing AS (
           AND s.source_schema = 'm2'
     LEFT JOIN bift.dim_classifications dc
            ON cc.classification_id = dc.classification_id
+    {% if ns.filter_periods %}
+      {% if (ns.ypw_triples | length) > 0 %}
+    WHERE (s.tahun, s.periode, s.week) IN (
+        {%- for ypw in ns.ypw_triples -%}
+        ({{ ypw[0] }}, {{ ypw[1] }}, {{ ypw[2] }}){% if not loop.last %}, {% endif %}
+        {%- endfor -%}
+    )
+      {% elif (ns.period_pairs | length) > 0 %}
+    WHERE (s.tahun, s.periode) IN (
+        {%- for pair in ns.period_pairs -%}
+        ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+        {%- endfor -%}
+    )
+      {% endif %}
+    {% endif %}
     GROUP BY
         s.source_schema, s.tahun, s.periode, s.week, s.inv_date,
         s.gdiv_id, s.gdiv_nm,

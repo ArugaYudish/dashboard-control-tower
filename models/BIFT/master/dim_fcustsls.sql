@@ -1,24 +1,58 @@
 {%- set v_tahun = var('tahun', none) -%}
 {%- set v_periode = var('periode', none) -%}
+{%- set v_periode_end = var('periode_end', v_periode) -%}
+{%- set v_all_periods = var('all_periods', false) -%}
+{%- set v_lookback_days = var('lookback_days', 35) | int -%}
 
-{%- if v_tahun is not none and v_periode is not none -%}
-    {%- set target_tahun = v_tahun | int -%}
-    {%- set target_periode = v_periode | int -%}
+{%- set ns = namespace(
+    filter_periods=true,
+    period_pairs=[],
+    tp_list=[]
+) -%}
+
+{%- if v_all_periods -%}
+    {%- set ns.filter_periods = false -%}
+{%- elif v_tahun is not none and v_periode is not none -%}
+    {%- set y = v_tahun | int -%}
+    {%- for p in range(v_periode | int, (v_periode_end | int) + 1) -%}
+        {%- set ns.period_pairs = ns.period_pairs + [(y, p)] -%}
+        {%- set ns.tp_list = ns.tp_list + [((y % 100) * 100 + p)] -%}
+    {%- endfor -%}
 {%- elif execute -%}
-    {%- set cycle_res = run_query("SELECT year::int AS tahun, period::int AS periode FROM spx.m_cycle3 WHERE cdate::date = CURRENT_DATE LIMIT 1") -%}
-    {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
-        {%- set target_tahun = cycle_res.columns[0].values()[0] | int -%}
-        {%- set target_periode = cycle_res.columns[1].values()[0] | int -%}
+    {%- set rel = adapter.get_relation(database=target.dbname, schema='bift', identifier='dim_fcustsls') -%}
+    {%- if rel is none -%}
+        {%- set ns.filter_periods = false -%}
     {%- else -%}
-        {%- set target_tahun = 2026 -%}
-        {%- set target_periode = 1 -%}
+        {%- set has_data_res = run_query("SELECT EXISTS (SELECT 1 FROM bift.dim_fcustsls LIMIT 1)") -%}
+        {%- set has_data = has_data_res.columns[0].values()[0] if (has_data_res and (has_data_res.rows | length) > 0) else false -%}
+        {%- if not has_data -%}
+            {%- set ns.filter_periods = false -%}
+        {%- else -%}
+            {%- set cycle_sql -%}
+                SELECT DISTINCT year::int AS tahun, period::int AS periode
+                FROM spx.m_cycle3
+                WHERE cdate::date BETWEEN (CURRENT_DATE - INTERVAL '{{ v_lookback_days }} days')::date AND CURRENT_DATE
+                ORDER BY 1, 2
+            {%- endset -%}
+            {%- set cycle_res = run_query(cycle_sql) -%}
+            {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
+                {%- for row in cycle_res.rows -%}
+                    {%- set r_y = row[0] | int -%}
+                    {%- set r_p = row[1] | int -%}
+                    {%- set ns.period_pairs = ns.period_pairs + [(r_y, r_p)] -%}
+                    {%- set ns.tp_list = ns.tp_list + [((r_y % 100) * 100 + r_p)] -%}
+                {%- endfor -%}
+            {%- else -%}
+                {%- set ns.filter_periods = false -%}
+            {%- endif -%}
+        {%- endif -%}
     {%- endif -%}
 {%- else -%}
-    {%- set target_tahun = 2026 -%}
-    {%- set target_periode = 1 -%}
+    {%- set ns.period_pairs = [(2026, 1)] -%}
+    {%- set ns.tp_list = [2601] -%}
 {%- endif -%}
 
-{%- set target_tahun_periode = ((target_tahun % 100) * 100 + target_periode) -%}
+{%- set tp_csv = ns.tp_list | join(', ') -%}
 
 {{
     config(
@@ -27,7 +61,11 @@
         alias='dim_fcustsls',
         unique_key=['tahun_periode'],
         incremental_strategy='delete+insert',
-        incremental_predicates=["DBT_INTERNAL_DEST.tahun_periode = " ~ target_tahun_periode],
+        incremental_predicates=(
+            ["DBT_INTERNAL_DEST.tahun_periode IN (" ~ tp_csv ~ ")"]
+            if ns.filter_periods and (ns.tp_list | length) > 0
+            else []
+        ),
         pre_hook=[
             "SET LOCAL work_mem = '256MB'"
         ],
@@ -56,9 +94,12 @@ WITH m1_staging AS (
       AND f.distributor_id IS NOT NULL
       AND f.tahun IS NOT NULL
       AND f.periode IS NOT NULL
-    {% if is_incremental() %}
-      AND f.periode = {{ target_periode }}
-      AND f.tahun = {{ target_tahun }}
+    {% if is_incremental() and ns.filter_periods and (ns.period_pairs | length) > 0 %}
+      AND (f.tahun, f.periode) IN (
+          {%- for pair in ns.period_pairs -%}
+          ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+          {%- endfor -%}
+      )
     {% endif %}
 ),
 
@@ -79,9 +120,12 @@ m2_staging AS (
       AND f.distributor_id IS NOT NULL
       AND f.tahun IS NOT NULL
       AND f.periode IS NOT NULL
-    {% if is_incremental() %}
-      AND f.periode = {{ target_periode }}
-      AND f.tahun = {{ target_tahun }}
+    {% if is_incremental() and ns.filter_periods and (ns.period_pairs | length) > 0 %}
+      AND (f.tahun, f.periode) IN (
+          {%- for pair in ns.period_pairs -%}
+          ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+          {%- endfor -%}
+      )
     {% endif %}
 ),
 
@@ -102,9 +146,12 @@ m3_staging AS (
       AND f.distributor_id IS NOT NULL
       AND f.tahun IS NOT NULL
       AND f.periode IS NOT NULL
-    {% if is_incremental() %}
-      AND f.periode = {{ target_periode }}
-      AND f.tahun = {{ target_tahun }}
+    {% if is_incremental() and ns.filter_periods and (ns.period_pairs | length) > 0 %}
+      AND (f.tahun, f.periode) IN (
+          {%- for pair in ns.period_pairs -%}
+          ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+          {%- endfor -%}
+      )
     {% endif %}
 ),
 

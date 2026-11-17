@@ -2,6 +2,7 @@
 {%- set v_periode = var('periode', none) -%}
 {%- set v_periode_end = var('periode_end', v_periode) -%}
 {%- set v_all_periods = var('all_periods', false) -%}
+{%- set v_lookback_days = var('lookback_days', 35) | int -%}
 
 {%- set ns = namespace(
     filter_periods=true,
@@ -32,25 +33,36 @@
     {%- if rel is none -%}
         {%- set ns.filter_periods = false -%}
     {%- else -%}
-        {%- set cycle_res = run_query("SELECT year::int AS tahun, period::int AS periode, EXISTS (SELECT 1 FROM bift.bronze_cb LIMIT 1) AS has_data FROM spx.m_cycle3 WHERE cdate::date = CURRENT_DATE LIMIT 1") -%}
-        {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
-            {%- set cur_y = cycle_res.columns[0].values()[0] | int -%}
-            {%- set cur_p = cycle_res.columns[1].values()[0] | int -%}
-            {%- set has_data = cycle_res.columns[2].values()[0] -%}
-            {%- if not has_data -%}
-                {%- set ns.filter_periods = false -%}
-            {%- else -%}
-                {%- set prev_y = cur_y if cur_p > 1 else (cur_y - 1) -%}
-                {%- set prev_p = (cur_p - 1) if cur_p > 1 else 12 -%}
-                {%- set ns.start_tahun = prev_y -%}
-                {%- set ns.start_periode = prev_p -%}
-                {%- set ns.end_tahun = cur_y -%}
-                {%- set ns.end_periode = cur_p -%}
-                {%- set ns.period_pairs = [(prev_y, prev_p), (cur_y, cur_p)] -%}
-                {%- set ns.tp_list = [((prev_y % 100) * 100 + prev_p), ((cur_y % 100) * 100 + cur_p)] -%}
-            {%- endif -%}
-        {%- else -%}
+        {%- set has_data_res = run_query("SELECT EXISTS (SELECT 1 FROM bift.bronze_cb LIMIT 1)") -%}
+        {%- set has_data = has_data_res.columns[0].values()[0] if (has_data_res and (has_data_res.rows | length) > 0) else false -%}
+        {%- if not has_data -%}
             {%- set ns.filter_periods = false -%}
+        {%- else -%}
+            {%- set cycle_sql -%}
+                SELECT DISTINCT year::int AS tahun, period::int AS periode
+                FROM spx.m_cycle3
+                WHERE cdate::date BETWEEN (CURRENT_DATE - INTERVAL '{{ v_lookback_days }} days')::date AND CURRENT_DATE
+                ORDER BY 1, 2
+            {%- endset -%}
+            {%- set cycle_res = run_query(cycle_sql) -%}
+            {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
+                {%- for row in cycle_res.rows -%}
+                    {%- set r_y = row[0] | int -%}
+                    {%- set r_p = row[1] | int -%}
+                    {%- if loop.first -%}
+                        {%- set ns.start_tahun = r_y -%}
+                        {%- set ns.start_periode = r_p -%}
+                    {%- endif -%}
+                    {%- if loop.last -%}
+                        {%- set ns.end_tahun = r_y -%}
+                        {%- set ns.end_periode = r_p -%}
+                    {%- endif -%}
+                    {%- set ns.period_pairs = ns.period_pairs + [(r_y, r_p)] -%}
+                    {%- set ns.tp_list = ns.tp_list + [((r_y % 100) * 100 + r_p)] -%}
+                {%- endfor -%}
+            {%- else -%}
+                {%- set ns.filter_periods = false -%}
+            {%- endif -%}
         {%- endif -%}
     {%- endif -%}
 {%- else -%}
@@ -186,7 +198,7 @@
                 y_next INT;
                 p_next INT;
             BEGIN
-                FOR y IN 2026..2026 LOOP
+                FOR y IN 2025..(EXTRACT(YEAR FROM CURRENT_DATE)::int + 1) LOOP
                     FOR p IN 1..12 LOOP
                         IF p = 12 THEN
                             y_next := y + 1;
