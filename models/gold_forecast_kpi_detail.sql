@@ -190,28 +190,48 @@ lagged AS (
 )
 
 SELECT
-    year,
-    period,
-    seq,
+    l.year,
+    l.period,
+    l.seq,
     -- Offset relatif terhadap periode berjalan hari ini.
     -- 0 = periode berjalan (MTD), 1 = bulan lalu, 2 = dua bulan lalu, dst.
     -- Dihitung ulang setiap dbt run, jadi otomatis bergeser tiap bulan.
-    (SELECT seq FROM {{ ref('dim_current_period') }}) - seq AS periods_ago,
-    channel,
-    nsm_id, nsm_name,
-    grsm_id, grsm_name,
-    rsm_id, rsm_name,
-    ss_id, ss_name,
-    distributor_id, distributor_name,
-    sbu_id, sbu_name,
-    brand_id, brand_name,
-    subbrand_id, subbrand_name,
-    parent_id, parent_name,
-    total_forecast,
-    total_actual,
+    (SELECT seq FROM {{ ref('dim_current_period') }}) - l.seq AS periods_ago,
+    l.channel,
+    l.nsm_id, l.nsm_name,
+    l.grsm_id, l.grsm_name,
+    l.rsm_id, l.rsm_name,
+    l.ss_id, l.ss_name,
+    l.distributor_id, l.distributor_name,
+    l.sbu_id, l.sbu_name,
+    l.brand_id, l.brand_name,
+    l.subbrand_id, l.subbrand_name,
+    l.parent_id, l.parent_name,
+    l.total_forecast,
+    l.total_actual,
     -- LAG memberi baris sebelumnya di partisi, yang belum tentu seq-1 kalau
     -- ada periode bolong. Guard ini menyamakan perilakunya dengan LEFT JOIN
     -- lama: periode yang tidak persis seq-1 tetap menghasilkan NULL.
-    CASE WHEN prev_seq = seq - 1 THEN prev_forecast END AS total_forecast_prev,
-    CASE WHEN prev_seq = seq - 1 THEN prev_actual   END AS total_actual_prev
-FROM lagged
+    CASE WHEN l.prev_seq = l.seq - 1 THEN l.prev_forecast END AS total_forecast_prev,
+    CASE WHEN l.prev_seq = l.seq - 1 THEN l.prev_actual   END AS total_actual_prev,
+    -- FDIS constrained. Flag ditentukan NASIONAL per (year, period, parent_id) di
+    -- int_fdis_constrained_parent_period, lalu ditempel ke setiap baris di sini;
+    -- FA tetap dihitung per baris/grup. Parent-bulan tanpa data FDIS = FALSE.
+    COALESCE(f.is_constrained, FALSE) AS is_constrained,
+    -- Kolom utama untuk Superset: SUM(total_forecast_constrained). Constrained ->
+    -- forecast dianggap = actual (GAP = 0); selain itu sama dengan total_forecast.
+    CASE WHEN COALESCE(f.is_constrained, FALSE) THEN l.total_actual
+         ELSE l.total_forecast
+    END AS total_forecast_constrained,
+    -- AUDIT SAJA -- JANGAN di-SUM. Nilai NASIONAL per parent-bulan yang diulang
+    -- di setiap baris (setiap distributor/channel/ss), jadi SUM akan menggelembung.
+    -- Untuk dibaca: MAX()/MIN() per (year, period, parent_id).
+    f.fdis_plan       AS fdis_plan_parent,
+    f.fdis_confirm_m1 AS fdis_confirm_m1_parent
+FROM lagged l
+-- Equi-join pada 3 kolom non-null (bukan IS NOT DISTINCT FROM), jadi tetap hash
+-- join. Model flag unik per (year, period, parent_id) -> jumlah baris tidak berubah.
+LEFT JOIN {{ ref('int_fdis_constrained_parent_period') }} f
+    ON  f.year      = l.year
+    AND f.period    = l.period
+    AND f.parent_id = l.parent_id
