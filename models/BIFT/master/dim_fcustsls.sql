@@ -1,10 +1,36 @@
+{%- set v_tahun = var('tahun', none) -%}
+{%- set v_periode = var('periode', none) -%}
+
+{%- if v_tahun is not none and v_periode is not none -%}
+    {%- set target_tahun = v_tahun | int -%}
+    {%- set target_periode = v_periode | int -%}
+{%- elif execute -%}
+    {%- set cycle_res = run_query("SELECT year::int AS tahun, period::int AS periode FROM spx.m_cycle3 WHERE cdate::date = CURRENT_DATE LIMIT 1") -%}
+    {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
+        {%- set target_tahun = cycle_res.columns[0].values()[0] | int -%}
+        {%- set target_periode = cycle_res.columns[1].values()[0] | int -%}
+    {%- else -%}
+        {%- set target_tahun = 2026 -%}
+        {%- set target_periode = 1 -%}
+    {%- endif -%}
+{%- else -%}
+    {%- set target_tahun = 2026 -%}
+    {%- set target_periode = 1 -%}
+{%- endif -%}
+
+{%- set target_tahun_periode = ((target_tahun % 100) * 100 + target_periode) -%}
+
 {{
     config(
         schema='bift',
         materialized='incremental',
         alias='dim_fcustsls',
-        unique_key=['distributor_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
+        unique_key=['tahun_periode'],
         incremental_strategy='delete+insert',
+        incremental_predicates=["DBT_INTERNAL_DEST.tahun_periode = " ~ target_tahun_periode],
+        pre_hook=[
+            "SET LOCAL work_mem = '256MB'"
+        ],
         indexes=[
             {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},
             {'columns': ['distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
@@ -22,24 +48,17 @@ WITH m1_staging AS (
         NULL::varchar AS group_channel_nm
     FROM raw_ficom_m1.v_fcustsls_staging f
     INNER JOIN (
-        SELECT DISTINCT ON (channel_id) *
+        SELECT DISTINCT ON (channel_id) channel_id, channel_nm
         FROM raw_ficom_m1.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    WHERE f.cust_id IS NOT NULL
+      AND f.distributor_id IS NOT NULL
+      AND f.tahun IS NOT NULL
+      AND f.periode IS NOT NULL
     {% if is_incremental() %}
-      {% if var('periode', none) is not none and var('tahun', none) is not none %}
-        WHERE f.periode = {{ var('periode') }}
-          AND f.tahun = {{ var('tahun') }}
-      {% else %}
-        WHERE (f.tahun, f.periode) IN (
-            SELECT DISTINCT tahun, periode
-            FROM raw_ficom_m1.v_fcustsls_staging
-            WHERE _airbyte_extracted_at > (
-                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
-                FROM {{ this }}
-            )
-        )
-      {% endif %}
+      AND f.periode = {{ target_periode }}
+      AND f.tahun = {{ target_tahun }}
     {% endif %}
 ),
 
@@ -52,24 +71,17 @@ m2_staging AS (
         NULL::varchar AS group_channel_nm
     FROM raw_ficom_m2.v_fcustsls_staging f
     INNER JOIN (
-        SELECT DISTINCT ON (channel_id) *
+        SELECT DISTINCT ON (channel_id) channel_id, channel_nm
         FROM raw_ficom_m2.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    WHERE f.cust_id IS NOT NULL
+      AND f.distributor_id IS NOT NULL
+      AND f.tahun IS NOT NULL
+      AND f.periode IS NOT NULL
     {% if is_incremental() %}
-      {% if var('periode', none) is not none and var('tahun', none) is not none %}
-        WHERE f.periode = {{ var('periode') }}
-          AND f.tahun = {{ var('tahun') }}
-      {% else %}
-        WHERE (f.tahun, f.periode) IN (
-            SELECT DISTINCT tahun, periode
-            FROM raw_ficom_m2.v_fcustsls_staging
-            WHERE _airbyte_extracted_at > (
-                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
-                FROM {{ this }}
-            )
-        )
-      {% endif %}
+      AND f.periode = {{ target_periode }}
+      AND f.tahun = {{ target_tahun }}
     {% endif %}
 ),
 
@@ -82,24 +94,17 @@ m3_staging AS (
         NULL::varchar AS group_channel_nm
     FROM raw_ficom_m3.v_fcustsls_staging f
     INNER JOIN (
-        SELECT DISTINCT ON (channel_id) *
+        SELECT DISTINCT ON (channel_id) channel_id, channel_nm
         FROM raw_ficom_m3.m_group_channels
         ORDER BY channel_id
     ) gc ON f.channel_id = gc.channel_id
+    WHERE f.cust_id IS NOT NULL
+      AND f.distributor_id IS NOT NULL
+      AND f.tahun IS NOT NULL
+      AND f.periode IS NOT NULL
     {% if is_incremental() %}
-      {% if var('periode', none) is not none and var('tahun', none) is not none %}
-        WHERE f.periode = {{ var('periode') }}
-          AND f.tahun = {{ var('tahun') }}
-      {% else %}
-        WHERE (f.tahun, f.periode) IN (
-            SELECT DISTINCT tahun, periode
-            FROM raw_ficom_m3.v_fcustsls_staging
-            WHERE _airbyte_extracted_at > (
-                SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
-                FROM {{ this }}
-            )
-        )
-      {% endif %}
+      AND f.periode = {{ target_periode }}
+      AND f.tahun = {{ target_tahun }}
     {% endif %}
 ),
 
@@ -115,31 +120,22 @@ staging_with_max_date AS (
     SELECT
         *,
         MAX(upd_date) OVER (
-            PARTITION BY source_schema, distributor_id, tahun, periode
+            PARTITION BY distributor_id, tahun, periode, source_schema
         ) AS upd_date_terakhir
     FROM combined_staging
-    WHERE cust_id IS NOT NULL 
-      AND distributor_id IS NOT NULL
-      AND tahun IS NOT NULL
-      AND periode IS NOT NULL
-),
-
-latest_date_per_distributor AS (
-    SELECT *
-    FROM staging_with_max_date
-    WHERE upd_date = upd_date_terakhir
 ),
 
 latest_staging_per_period AS (
-    SELECT DISTINCT ON (distributor_id, sls_id, cust_id, tahun, periode)
+    SELECT DISTINCT ON (distributor_id, tahun, periode, sls_id, cust_id)
         *
-    FROM latest_date_per_distributor
+    FROM staging_with_max_date
+    WHERE upd_date = upd_date_terakhir
     ORDER BY 
         distributor_id,
+        tahun,
+        periode,
         sls_id,
         cust_id,
-        tahun DESC,
-        periode DESC,
         upd_date DESC NULLS LAST,
         _airbyte_extracted_at DESC NULLS LAST,
         source_schema ASC
