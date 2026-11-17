@@ -1,11 +1,89 @@
+{%- set v_tahun = var('tahun', none) -%}
+{%- set v_periode = var('periode', none) -%}
+{%- set v_periode_end = var('periode_end', v_periode) -%}
+{%- set v_all_periods = var('all_periods', false) -%}
+
+{%- set ns = namespace(
+    filter_periods=true,
+    start_tahun=2026,
+    start_periode=1,
+    end_tahun=2026,
+    end_periode=1,
+    period_pairs=[],
+    tp_list=[]
+) -%}
+
+{%- if v_all_periods -%}
+    {%- set ns.filter_periods = false -%}
+{%- elif v_tahun is not none and v_periode is not none -%}
+    {%- set y = v_tahun | int -%}
+    {%- set p_start = v_periode | int -%}
+    {%- set p_end = v_periode_end | int -%}
+    {%- set ns.start_tahun = y -%}
+    {%- set ns.start_periode = p_start -%}
+    {%- set ns.end_tahun = y -%}
+    {%- set ns.end_periode = p_end -%}
+    {%- for p in range(p_start, p_end + 1) -%}
+        {%- set ns.period_pairs = ns.period_pairs + [(y, p)] -%}
+        {%- set ns.tp_list = ns.tp_list + [((y % 100) * 100 + p)] -%}
+    {%- endfor -%}
+{%- elif execute -%}
+    {%- set rel = adapter.get_relation(database=target.dbname, schema='bift', identifier='bronze_cb') -%}
+    {%- if rel is none -%}
+        {%- set ns.filter_periods = false -%}
+    {%- else -%}
+        {%- set cycle_res = run_query("SELECT year::int AS tahun, period::int AS periode, EXISTS (SELECT 1 FROM bift.bronze_cb LIMIT 1) AS has_data FROM spx.m_cycle3 WHERE cdate::date = CURRENT_DATE LIMIT 1") -%}
+        {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
+            {%- set cur_y = cycle_res.columns[0].values()[0] | int -%}
+            {%- set cur_p = cycle_res.columns[1].values()[0] | int -%}
+            {%- set has_data = cycle_res.columns[2].values()[0] -%}
+            {%- if not has_data -%}
+                {%- set ns.filter_periods = false -%}
+            {%- else -%}
+                {%- set prev_y = cur_y if cur_p > 1 else (cur_y - 1) -%}
+                {%- set prev_p = (cur_p - 1) if cur_p > 1 else 12 -%}
+                {%- set ns.start_tahun = prev_y -%}
+                {%- set ns.start_periode = prev_p -%}
+                {%- set ns.end_tahun = cur_y -%}
+                {%- set ns.end_periode = cur_p -%}
+                {%- set ns.period_pairs = [(prev_y, prev_p), (cur_y, cur_p)] -%}
+                {%- set ns.tp_list = [((prev_y % 100) * 100 + prev_p), ((cur_y % 100) * 100 + cur_p)] -%}
+            {%- endif -%}
+        {%- else -%}
+            {%- set ns.filter_periods = false -%}
+        {%- endif -%}
+    {%- endif -%}
+{%- else -%}
+    {%- set ns.period_pairs = [(2026, 1)] -%}
+    {%- set ns.tp_list = [2601] -%}
+{%- endif -%}
+
+{%- set tp_csv = ns.tp_list | join(', ') -%}
+
 {{
     config(
         schema='bift',
         materialized='incremental',
         alias='bronze_cb',
-        unique_key=['distributor_id', 'ss_id', 'sls_id', 'cust_id', 'tahun', 'periode'],
+        unique_key=['tahun', 'periode'],
         incremental_strategy='delete+insert',
-        pre_hook="""
+        incremental_predicates=(
+            [
+                "DBT_INTERNAL_DEST.tahun = " ~ ns.start_tahun,
+                "DBT_INTERNAL_DEST.periode BETWEEN " ~ ns.start_periode ~ " AND " ~ ns.end_periode
+            ]
+            if ns.filter_periods and (ns.tp_list | length) > 0 and ns.start_tahun == ns.end_tahun
+            else (
+                [
+                    "((DBT_INTERNAL_DEST.tahun = " ~ ns.start_tahun ~ " AND DBT_INTERNAL_DEST.periode = " ~ ns.start_periode ~ ") OR (DBT_INTERNAL_DEST.tahun = " ~ ns.end_tahun ~ " AND DBT_INTERNAL_DEST.periode = " ~ ns.end_periode ~ "))"
+                ]
+                if ns.filter_periods and (ns.tp_list | length) > 0
+                else []
+            )
+        ),
+        pre_hook=[
+            "SET LOCAL work_mem = '256MB'",
+            """
             CREATE TABLE IF NOT EXISTS bift.bronze_cb (
                 source_schema text NULL,
                 _airbyte_extracted_at timestamptz NULL,
@@ -101,34 +179,6 @@
                 climit numeric NULL
             ) PARTITION BY RANGE (tahun, periode);
 
-            ALTER TABLE IF EXISTS bift.bronze_cb 
-                ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT CURRENT_TIMESTAMP,
-                ADD COLUMN IF NOT EXISTS barcode varchar NULL,
-                ADD COLUMN IF NOT EXISTS cphone1 varchar NULL,
-                ADD COLUMN IF NOT EXISTS regdate timestamp NULL,
-                ADD COLUMN IF NOT EXISTS flagbon varchar NULL,
-                ADD COLUMN IF NOT EXISTS flagpay varchar NULL,
-                ADD COLUMN IF NOT EXISTS ogrp_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS ccontact varchar NULL,
-                ADD COLUMN IF NOT EXISTS custadd1 varchar NULL,
-                ADD COLUMN IF NOT EXISTS custadd2 varchar NULL,
-                ADD COLUMN IF NOT EXISTS flagcust varchar NULL,
-                ADD COLUMN IF NOT EXISTS deli_add1 varchar NULL,
-                ADD COLUMN IF NOT EXISTS oclass_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS flagcredit varchar NULL,
-                ADD COLUMN IF NOT EXISTS lastclass varchar NULL,
-                ADD COLUMN IF NOT EXISTS gdisc_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS otype_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS ogrp1_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS ogrp2_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS ospec_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS pasar_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS gprice_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS flaglimit varchar NULL,
-                ADD COLUMN IF NOT EXISTS indkey_id varchar NULL,
-                ADD COLUMN IF NOT EXISTS last_type varchar NULL,
-                ADD COLUMN IF NOT EXISTS climit numeric NULL;
-
             DO $$
             DECLARE
                 y INT;
@@ -154,7 +204,8 @@
                 END LOOP;
                 EXECUTE 'CREATE TABLE IF NOT EXISTS bift.bronze_cb_default PARTITION OF bift.bronze_cb DEFAULT;';
             END $$;
-        """,
+            """
+        ],
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id', 'cust_id'],         'type': 'btree'},
           {'columns': ['tahun', 'periode', 'distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},
@@ -339,16 +390,11 @@ LEFT JOIN customer_with_location cwl
 WHERE dfs.channel_id != '999'
   AND dfs.flag_aktif = 'Y'
   AND dfs.salesforce_id NOT IN ('999', '116', '213', '222')
-{% if is_incremental() %}
-  {% if var('periode', none) is not none and var('tahun', none) is not none %}
-    {# Manual backfill: dbt run --vars '{"periode": 8, "tahun": 2026}' #}
-    AND dfs.periode = {{ var('periode') }}
-    AND dfs.tahun = {{ var('tahun') }}
-  {% else %}
-    {# Auto-detect: check directly from physical dim_fcustsls table #}
-    AND dfs._airbyte_extracted_at > (
-        SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz)
-        FROM {{ this }}
-    )
-  {% endif %}
+{% if is_incremental() and ns.filter_periods and (ns.period_pairs | length) > 0 %}
+  AND dfs.tahun_periode IN ({{ tp_csv }})
+  AND (dfs.tahun, dfs.periode) IN (
+      {%- for pair in ns.period_pairs -%}
+      ({{ pair[0] }}, {{ pair[1] }}){% if not loop.last %}, {% endif %}
+      {%- endfor -%}
+  )
 {% endif %}
