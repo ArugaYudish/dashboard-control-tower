@@ -67,7 +67,8 @@
             else []
         ),
         pre_hook=[
-            "SET LOCAL work_mem = '256MB'"
+            "SET LOCAL work_mem = '256MB'",
+            "{% if is_incremental() and var('all_periods', false) %} TRUNCATE TABLE {{ this }}; {% endif %}"
         ],
         indexes=[
             {'columns': ['tahun', 'periode', 'distributor_id'], 'type': 'btree'},

@@ -1,10 +1,11 @@
 {{
     config(
         schema='bift',
-        materialized='incremental',
+        materialized='table',
         alias='dim_validasi_outlet_last',
-        unique_key=['distributor_id', 'cust_id'],
-        incremental_strategy='delete+insert',
+        pre_hook=[
+            "SET LOCAL work_mem = '256MB'"
+        ],
         indexes=[
           {'columns': ['distributor_id', 'cust_id'], 'type': 'btree'}
         ]
@@ -20,9 +21,6 @@ WITH combined_validasi_outlet AS (
         longitude,
         _airbyte_extracted_at
     FROM raw_ficom_m1.m_validasi_outlet_last
-    {% if is_incremental() %}
-    WHERE _airbyte_extracted_at > (SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz) FROM {{ this }})
-    {% endif %}
 
     UNION ALL
 
@@ -34,9 +32,6 @@ WITH combined_validasi_outlet AS (
         longitude,
         _airbyte_extracted_at
     FROM raw_ficom_m2.m_validasi_outlet_last
-    {% if is_incremental() %}
-    WHERE _airbyte_extracted_at > (SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz) FROM {{ this }})
-    {% endif %}
 
     UNION ALL
 
@@ -48,9 +43,6 @@ WITH combined_validasi_outlet AS (
         longitude,
         _airbyte_extracted_at
     FROM raw_ficom_m3.m_validasi_outlet_last
-    {% if is_incremental() %}
-    WHERE _airbyte_extracted_at > (SELECT COALESCE(MAX(_airbyte_extracted_at), '1970-01-01'::timestamptz) FROM {{ this }})
-    {% endif %}
 )
 
 SELECT DISTINCT ON (distributor_id, cust_id)

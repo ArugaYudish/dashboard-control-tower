@@ -92,7 +92,8 @@
         unique_key=['tahun', 'periode', 'week'],
         incremental_strategy='delete+insert',
         pre_hook=[
-            "SET LOCAL work_mem = '256MB'"
+            "SET LOCAL work_mem = '256MB'",
+            "{% if is_incremental() and var('all_periods', false) %} TRUNCATE TABLE {{ this }}; {% endif %}"
         ],
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id', 'sls_id', 'cust_id'], 'type': 'btree'},

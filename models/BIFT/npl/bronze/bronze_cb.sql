@@ -95,6 +95,7 @@
         ),
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
+            "{% if is_incremental() and var('all_periods', false) %} TRUNCATE TABLE {{ this }}; {% endif %}",
             """
             CREATE TABLE IF NOT EXISTS bift.bronze_cb (
                 source_schema text NULL,
