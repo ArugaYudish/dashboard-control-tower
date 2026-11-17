@@ -79,7 +79,7 @@ cycle_week as (
 ),
 fdis_confirm as (
   select cw.year::int as year, cw.period::int as period, mp.parent_id,
-         sum(coalesce(c.qty_adj, c.qty)) as fdis_confirm_m1
+         sum(coalesce(c.qty_adj, c.qty)) as fdis_confirm
   from spx.t_upload_fdis_confirm c
   join cycle_week cw
     on cw.year = c.year and cw.week = c.week
@@ -115,16 +115,16 @@ select
   s.period,
   s.parent_id,
   fp.fdis_plan,
-  fc.fdis_confirm_m1,
+  fc.fdis_confirm,
   sa.salfo_national,
   -- CASE eksplisit, bukan sekadar `confirm < LEAST(...)`: LEAST di Postgres mengabaikan
   -- NULL (LEAST(NULL, 5) = 5). Data FDIS yang tidak ada bukan bukti constraint; membacanya
   -- sebagai constrained/0 akan menaikkan FA secara palsu.
   case
     when fp.fdis_plan is null
-      or fc.fdis_confirm_m1 is null
+      or fc.fdis_confirm is null
       or sa.salfo_national is null then false
-    else fc.fdis_confirm_m1 < least(sa.salfo_national, fp.fdis_plan)
+    else fc.fdis_confirm < least(sa.salfo_national, fp.fdis_plan)
   end as is_constrained
 from spine s
 left join fdis_plan    fp on fp.year = s.year and fp.period = s.period and fp.parent_id = s.parent_id

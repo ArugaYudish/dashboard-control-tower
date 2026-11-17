@@ -227,7 +227,7 @@ SELECT
     -- di setiap baris (setiap distributor/channel/ss), jadi SUM akan menggelembung.
     -- Untuk dibaca: MAX()/MIN() per (year, period, parent_id).
     f.fdis_plan       AS fdis_plan_parent,
-    f.fdis_confirm_m1 AS fdis_confirm_m1_parent
+    f.fdis_confirm AS fdis_confirm_parent
 FROM lagged l
 -- Equi-join pada 3 kolom non-null (bukan IS NOT DISTINCT FROM), jadi tetap hash
 -- join. Model flag unik per (year, period, parent_id) -> jumlah baris tidak berubah.
