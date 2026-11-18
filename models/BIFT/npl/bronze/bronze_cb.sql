@@ -1,74 +1,5 @@
-{%- set v_tahun = var('tahun', none) -%}
-{%- set v_periode = var('periode', none) -%}
-{%- set v_periode_end = var('periode_end', v_periode) -%}
-{%- set v_all_periods = var('all_periods', false) -%}
-{%- set v_lookback_days = var('lookback_days', 35) | int -%}
-
-{%- set ns = namespace(
-    filter_periods=true,
-    start_tahun=2026,
-    start_periode=1,
-    end_tahun=2026,
-    end_periode=1,
-    period_pairs=[],
-    tp_list=[]
-) -%}
-
-{%- if v_all_periods -%}
-    {%- set ns.filter_periods = false -%}
-{%- elif v_tahun is not none and v_periode is not none -%}
-    {%- set y = v_tahun | int -%}
-    {%- set p_start = v_periode | int -%}
-    {%- set p_end = v_periode_end | int -%}
-    {%- set ns.start_tahun = y -%}
-    {%- set ns.start_periode = p_start -%}
-    {%- set ns.end_tahun = y -%}
-    {%- set ns.end_periode = p_end -%}
-    {%- for p in range(p_start, p_end + 1) -%}
-        {%- set ns.period_pairs = ns.period_pairs + [(y, p)] -%}
-        {%- set ns.tp_list = ns.tp_list + [((y % 100) * 100 + p)] -%}
-    {%- endfor -%}
-{%- elif execute -%}
-    {%- set rel = adapter.get_relation(database=target.dbname, schema='bift', identifier='bronze_cb') -%}
-    {%- if rel is none -%}
-        {%- set ns.filter_periods = false -%}
-    {%- else -%}
-        {%- set has_data_res = run_query("SELECT EXISTS (SELECT 1 FROM bift.bronze_cb LIMIT 1)") -%}
-        {%- set has_data = has_data_res.columns[0].values()[0] if (has_data_res and (has_data_res.rows | length) > 0) else false -%}
-        {%- if not has_data -%}
-            {%- set ns.filter_periods = false -%}
-        {%- else -%}
-            {%- set cycle_sql -%}
-                SELECT DISTINCT year::int AS tahun, period::int AS periode
-                FROM spx.m_cycle3
-                WHERE cdate::date BETWEEN (CURRENT_DATE - INTERVAL '{{ v_lookback_days }} days')::date AND CURRENT_DATE
-                ORDER BY 1, 2
-            {%- endset -%}
-            {%- set cycle_res = run_query(cycle_sql) -%}
-            {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
-                {%- for row in cycle_res.rows -%}
-                    {%- set r_y = row[0] | int -%}
-                    {%- set r_p = row[1] | int -%}
-                    {%- if loop.first -%}
-                        {%- set ns.start_tahun = r_y -%}
-                        {%- set ns.start_periode = r_p -%}
-                    {%- endif -%}
-                    {%- if loop.last -%}
-                        {%- set ns.end_tahun = r_y -%}
-                        {%- set ns.end_periode = r_p -%}
-                    {%- endif -%}
-                    {%- set ns.period_pairs = ns.period_pairs + [(r_y, r_p)] -%}
-                    {%- set ns.tp_list = ns.tp_list + [((r_y % 100) * 100 + r_p)] -%}
-                {%- endfor -%}
-            {%- else -%}
-                {%- set ns.filter_periods = false -%}
-            {%- endif -%}
-        {%- endif -%}
-    {%- endif -%}
-{%- else -%}
-    {%- set ns.period_pairs = [(2026, 1)] -%}
-    {%- set ns.tp_list = [2601] -%}
-{%- endif -%}
+{%- set ns = namespace() -%}
+{%- do bift_resolve_cycle_window(ns, relation_schema='bift', relation_name='bronze_cb', default_lookback_weeks=2) -%}
 
 {%- set tp_csv = ns.tp_list | join(', ') -%}
 
@@ -77,25 +8,9 @@
         schema='bift',
         materialized='incremental',
         alias='bronze_cb',
-        unique_key=['tahun', 'periode'],
-        incremental_strategy='delete+insert',
-        incremental_predicates=(
-            [
-                "DBT_INTERNAL_DEST.tahun = " ~ ns.start_tahun,
-                "DBT_INTERNAL_DEST.periode BETWEEN " ~ ns.start_periode ~ " AND " ~ ns.end_periode
-            ]
-            if ns.filter_periods and (ns.tp_list | length) > 0 and ns.start_tahun == ns.end_tahun
-            else (
-                [
-                    "((DBT_INTERNAL_DEST.tahun = " ~ ns.start_tahun ~ " AND DBT_INTERNAL_DEST.periode = " ~ ns.start_periode ~ ") OR (DBT_INTERNAL_DEST.tahun = " ~ ns.end_tahun ~ " AND DBT_INTERNAL_DEST.periode = " ~ ns.end_periode ~ "))"
-                ]
-                if ns.filter_periods and (ns.tp_list | length) > 0
-                else []
-            )
-        ),
+        incremental_strategy='append',
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
-            "{% if is_incremental() and var('all_periods', false) %} TRUNCATE TABLE {{ this }}; {% endif %}",
             """
             CREATE TABLE IF NOT EXISTS bift.bronze_cb (
                 source_schema text NULL,
@@ -217,7 +132,8 @@
                 END LOOP;
                 EXECUTE 'CREATE TABLE IF NOT EXISTS bift.bronze_cb_default PARTITION OF bift.bronze_cb DEFAULT;';
             END $$;
-            """
+            """,
+            "{{ bift_delete_target_periods('yp') }}"
         ],
         indexes=[
           {'columns': ['tahun', 'periode', 'distributor_id', 'cust_id'],         'type': 'btree'},
@@ -269,13 +185,13 @@ WITH customer_with_location AS (
         dl.kecamatan_name,
         dl.kelurahan_code,
         dl.kelurahan_name
-    FROM bift.dim_customer f
-    LEFT JOIN bift.dim_lokasi dl
+    FROM {{ ref('dim_customer') }} f
+    LEFT JOIN {{ ref('dim_lokasi') }} dl
         ON f.prop_id = dl.provinsi_code 
        AND f.kab_id = dl.kabupaten_code 
        AND f.kec_id = dl.kecamatan_code 
        AND f.kel_id = dl.kelurahan_code 
-    LEFT JOIN bift.dim_validasi_outlet_last vol
+    LEFT JOIN {{ ref('dim_validasi_outlet_last') }} vol
         ON f.subdist_id = vol.distributor_id
        AND f.custno = vol.cust_id
     ORDER BY f.subdist_id, f.custno
@@ -382,8 +298,8 @@ SELECT
     cwl.indkey_id,
     cwl.last_type,
     cwl.climit
-FROM bift.dim_fcustsls dfs
-INNER JOIN bift.dim_salesman_hierarchy sh 
+FROM {{ ref('dim_fcustsls') }} dfs
+INNER JOIN {{ ref('dim_salesman_hierarchy') }} sh 
     ON dfs.distributor_id = sh.distributor_id
    AND dfs.sls_id         = sh.sls_id
    AND (
@@ -391,10 +307,10 @@ INNER JOIN bift.dim_salesman_hierarchy sh
         OR dfs.tahun < sh.termin_year
         OR (dfs.tahun = sh.termin_year AND dfs.periode <= sh.termin_period)
    )
-LEFT JOIN bift.dim_group_channel dgc
+LEFT JOIN {{ ref('dim_group_channel') }} dgc
     ON dfs.channel_id = dgc.channel_id
    AND sh.source_schema = dgc.source_schema
-LEFT JOIN bift.dim_mapping_group_salesforce mmgs
+LEFT JOIN {{ ref('dim_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND sh.source_schema = mmgs.source_schema
 LEFT JOIN customer_with_location cwl

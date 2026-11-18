@@ -44,7 +44,7 @@ combined_hierarchy AS (
     JOIN raw_ficom_m1.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN bift.dim_salesman_spv c
+    JOIN {{ ref('dim_salesman_spv') }} c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
      AND c.source_schema = 'm1'
@@ -93,7 +93,7 @@ combined_hierarchy AS (
     JOIN raw_ficom_m2.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN bift.dim_salesman_spv c
+    JOIN {{ ref('dim_salesman_spv') }} c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
      AND c.source_schema = 'm2'
@@ -142,7 +142,7 @@ combined_hierarchy AS (
     JOIN raw_ficom_m3.m_employee e
       ON h.ss_id = e.emp_id
      AND e.terminate_date IS NULL
-    JOIN bift.dim_salesman_spv c
+    JOIN {{ ref('dim_salesman_spv') }} c
       ON c.sls_id = h.sls_id
      AND c.distributor_id = h.distributor_id
      AND c.source_schema = 'm3'
@@ -228,7 +228,7 @@ SELECT
     h.termin_period
 
 FROM combined_hierarchy h
-LEFT JOIN bift.dim_salesman sm
+LEFT JOIN {{ ref('dim_salesman') }} sm
        ON h.distributor_id = sm.distributor_id
       AND h.sls_id        = sm.sls_id
 WHERE sm.sls_id IS NOT NULL

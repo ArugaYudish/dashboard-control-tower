@@ -1,46 +1,5 @@
-{%- set v_tahun = var('tahun', none) -%}
-{%- set v_periode = var('periode', none) -%}
-{%- set v_periode_end = var('periode_end', v_periode) -%}
-{%- set v_all_periods = var('all_periods', false) -%}
-{%- set v_lookback_days = var('lookback_days', 35) | int -%}
-
-{%- set ns = namespace(
-    filter_periods=true,
-    period_pairs=[],
-    ypw_triples=[]
-) -%}
-
-{%- if v_all_periods -%}
-    {%- set ns.filter_periods = false -%}
-{%- elif v_tahun is not none and v_periode is not none -%}
-    {%- set y = v_tahun | int -%}
-    {%- for p in range(v_periode | int, (v_periode_end | int) + 1) -%}
-        {%- set ns.period_pairs = ns.period_pairs + [(y, p)] -%}
-    {%- endfor -%}
-{%- elif execute -%}
-    {%- set cycle_sql -%}
-        SELECT DISTINCT year::int AS tahun, period::int AS periode, week::int AS week_no
-        FROM spx.m_cycle3
-        WHERE cdate::date BETWEEN (CURRENT_DATE - INTERVAL '{{ v_lookback_days }} days')::date AND CURRENT_DATE
-        ORDER BY 1, 2, 3
-    {%- endset -%}
-    {%- set cycle_res = run_query(cycle_sql) -%}
-    {%- if cycle_res and (cycle_res.rows | length) > 0 -%}
-        {%- for row in cycle_res.rows -%}
-            {%- set r_y = row[0] | int -%}
-            {%- set r_p = row[1] | int -%}
-            {%- set r_w = row[2] | int -%}
-            {%- if (r_y, r_p) not in ns.period_pairs -%}
-                {%- set ns.period_pairs = ns.period_pairs + [(r_y, r_p)] -%}
-            {%- endif -%}
-            {%- set ns.ypw_triples = ns.ypw_triples + [(r_y, r_p, r_w)] -%}
-        {%- endfor -%}
-    {%- else -%}
-        {%- set ns.filter_periods = false -%}
-    {%- endif -%}
-{%- else -%}
-    {%- set ns.period_pairs = [(2026, 1)] -%}
-{%- endif -%}
+{%- set ns = namespace() -%}
+{%- do bift_resolve_cycle_window(ns, default_lookback_weeks=2) -%}
 
 {{
     config(
@@ -141,7 +100,7 @@ WITH non_purchasing AS (
         0                                           AS is_transaction
     FROM (
         SELECT *
-        FROM bift.bronze_cb
+        FROM {{ ref('bronze_cb') }}
         {% if ns.filter_periods and (ns.period_pairs | length) > 0 %}
         WHERE (tahun, periode) IN (
             {%- for pair in ns.period_pairs -%}
@@ -263,7 +222,7 @@ purchasing AS (
         COALESCE(SUM(s.qty_carton), 0)              AS qty_carton,
         COALESCE(SUM(s.inv_val), 0)                 AS inv_val,
         1                                           AS is_transaction
-    FROM bift.silver_oa_transaction s
+    FROM {{ ref('silver_oa_transaction') }} s
     LEFT JOIN raw_ficom_m2.m_channel_classifications cc
            ON s.channel_id    = cc.channel_id
           AND s.source_schema = 'm2'
