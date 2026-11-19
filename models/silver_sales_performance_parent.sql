@@ -311,10 +311,26 @@ select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period 
        -- silver_sales_performance_chart joins prior year on this instead of the five
        -- product-attribute columns: one integer equality, hash-joinable and NULL-free.
        k.pg_id, case when md.flagdirect = '0' then 'DIRECT' else 'NON DIRECT' end as flag_direct,
-       stock.git_qty, stock.git_value
+       stock.git_qty, stock.git_value,
+       -- Whether the distributor's divisi matches the product's division, using the same
+       -- rule as the guard in the `stock` CTE. Only stock is filtered at source; stm, salfo,
+       -- omset_ibn, target and fdos still bring keys from mismatched subdists. This flag
+       -- drops nothing -- the stray rows stay for audit -- so charts that need clean data
+       -- filter `is_divisi_match = true`. A div_id missing from division_group_map yields
+       -- false for M1/M245/M3 subdists, never NULL.
+       coalesce(
+         coalesce(md.divisi, '') not in ('M1', 'M245', 'M3')
+           or md.divisi = case
+                            when dg.m_group = 'M1'                then 'M1'
+                            when dg.m_group in ('M2', 'M4', 'M5') then 'M245'
+                            when dg.m_group = 'M3'                then 'M3'
+                          end,
+         false
+       ) as is_divisi_match
 from all_keys k
 join cycle_ranked cr on cr.year = k.year and cr.week = k.week
 join pg_dim d on d.pg_id = k.pg_id
+left join {{ ref('division_group_map') }} dg on dg.div_id = d.div_id
 join spx.m_distributor md on md.distributor_id = k.distributor_id
 left join spx.m_division mdiv on mdiv.div_id = d.div_id
 left join spx.m_brand mbrand on mbrand.brand_id = d.brand_id
