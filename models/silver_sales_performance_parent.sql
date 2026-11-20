@@ -265,7 +265,7 @@ fdos as
   SELECT a.year, a.week, a.distributor_id, a.pg_id, SUM(a.fdos_update) as fdos_update, SUM(a.fdos_value) as fdos_value
   FROM (
 select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_update, vfu.fdos_update * coalesce(mpd.price,0) as fdos_value
-   from spx.v_fdos_update vfu
+   from {{ ref('silver_fdos_update_from_gold') }} vfu
  	inner join cycle_ranked cw on vfu.year = cw.year and vfu.period = cw.period and vfu.week = cw.week
 	inner join pcode_pg pg on vfu.pcode = pg.pcode
   inner join spx.m_distributor md on vfu.distributor_id = md.distributor_id

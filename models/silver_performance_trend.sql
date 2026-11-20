@@ -84,7 +84,7 @@ fdos as (
     select
       vfu.period, vfu.year, mp.parent_id, vfu.week, vfu.distributor_id,
       sum(vfu.fdos_update) as fdos_update
-    from spx.v_fdos_update vfu
+    from {{ ref('silver_fdos_update_from_gold') }} vfu
     join cycle_week cw
       on cw.year = vfu.year and cw.week = vfu.week
     left join spx.m_product mp
