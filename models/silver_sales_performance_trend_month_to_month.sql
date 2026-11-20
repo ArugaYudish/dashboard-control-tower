@@ -100,7 +100,24 @@ left join fdis_plan  on fdis_plan.parent_id = ph.parent_id
 )
 select channel, a.year, a.period, a.periodname, nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name, 
 	sbu_id, sbu_name, brand_id, brand_name, subbrand_id,subbrand_name,a.parent_id,parent_name,flag_sku,a.distributor_id,distributor_name,
-	salfo_qty, salfo_value, stm_qty, stm_value, fdos_update, fdos_value, sta_qty, sta_value, fdis_update, fdis_actual, fdis_plan, fdos_plan
+	salfo_qty, salfo_value, stm_qty, stm_value, fdos_update, fdos_value, sta_qty, sta_value, fdis_update, fdis_actual,
+	-- Diberi prefix karena model flag di bawah juga punya kolom fdis_plan (definisi
+	-- berbeda: upload M-1). Kolom ini tetap yang lama, dari t_fdis_marketing_d.
+	fdis.fdis_plan, fdos_plan,
+	-- FDIS constrained. Flag NASIONAL per (year, period, parent_id) dari
+	-- int_fdis_constrained_parent_period -- model yang sama dengan gold_forecast_kpi_by_period,
+	-- jadi kedua dashboard memakai flag yang identik. Parent-bulan tanpa data FDIS = FALSE.
+	COALESCE(f.is_constrained, FALSE) AS is_constrained,
+	-- Dipakai Superset sebagai SUM(...) untuk FA/FB Constrained. Constrained -> forecast
+	-- dianggap = actual (GAP = 0). COALESCE karena stm NULL di baris tanpa penjualan
+	-- (model ini tidak membuangnya); SUM tetap sama karena SUM mengabaikan NULL.
+	CASE WHEN COALESCE(f.is_constrained, FALSE) THEN COALESCE(stm_qty, 0)   ELSE salfo_qty   END AS salfo_qty_constrained,
+	CASE WHEN COALESCE(f.is_constrained, FALSE) THEN COALESCE(stm_value, 0) ELSE salfo_value END AS salfo_value_constrained,
+	-- AUDIT SAJA -- JANGAN di-SUM. Nilai NASIONAL per parent-bulan yang diulang di setiap
+	-- baris (setiap distributor/channel/ss), jadi SUM akan menggelembung.
+	-- Jangan tertukar dengan kolom fdis_plan di atas (definisi lama, bukan M-1).
+	f.fdis_plan    AS fdis_plan_parent,
+	f.fdis_confirm AS fdis_confirm_parent
 FROM
 (select channel, ssp.year, ssp.period, ssp.periodname,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,
 	ssp.distributor_id,distributor_name,
@@ -113,3 +130,9 @@ brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,ssp.dist
 ) a 	
 left join fdis on a.year = fdis.year and a.period = fdis.period and a.parent_id  = fdis.parent_id
 left join fdos_plan on a.year = fdos_plan.year and a.period = fdos_plan.period and a.parent_id = fdos_plan.parent_id and a.distributor_id = fdos_plan.distributor_id
+-- Equi-join pada 3 kolom non-null. year/period di sini numeric, di model flag integer.
+-- Model flag unik per (year, period, parent_id) -> jumlah baris tidak berubah.
+left join {{ ref('int_fdis_constrained_parent_period') }} f
+  on  f.year      = a.year::int
+  and f.period    = a.period::int
+  and f.parent_id = a.parent_id
