@@ -177,6 +177,21 @@ agg as (
          sum(salfo)     as salfo
   from metrics
   group by year_upload, period_upload, year, period, channel, pg_id, distributor_id
+),
+
+-- Actual STM for the forecast month. Keyed on pg_id rather than parent_id: the output
+-- grain is pg_id, so a parent_id join would copy each parent's STM onto all its product
+-- groups. STM has no upload dimension, so the same value repeats on every upload vintage
+-- (lead_months) of a forecast month -- filter on one vintage before summing it.
+stm as (
+  select year, period, pg_id, distributor_id,
+         sum(coalesce(stm_qty, 0))   as stm_qty,
+         sum(coalesce(stm_value, 0)) as stm_value
+  from spx.silver_sales_performance_parent
+  where year >= extract(year from current_date) - 1
+    and stm_qty is not null
+    and stm_qty <> 0
+  group by year, period, pg_id, distributor_id
 )
 
 select a.channel,
@@ -195,6 +210,7 @@ select a.channel,
        d.flag_season as flag_sku,
        a.distributor_id, md.distributor_nm as distributor_name,
        a.fdos_plan, a.fdis_plan, a.salfo,
+       coalesce(stm.stm_qty, 0) as stm_qty, coalesce(stm.stm_value, 0) as stm_value,
        a.pg_id, now() as loaded_at
 from agg a
 join pg_dim d on d.pg_id = a.pg_id
@@ -210,3 +226,9 @@ left join spx.m_parent mparent on mparent.parent_id = d.parent_id
 left join spx.m_distributor md on md.distributor_id = a.distributor_id
 left join sales_hierarchy vsh
   on vsh.pg_id = a.pg_id and vsh.distributor_id = a.distributor_id
+-- fdis rows (distributor_id NULL) never match, so they get stm = 0.
+left join stm
+  on  stm.year           = a.year
+  and stm.period         = a.period
+  and stm.pg_id          = a.pg_id
+  and stm.distributor_id = a.distributor_id
