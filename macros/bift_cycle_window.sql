@@ -180,12 +180,10 @@
                     DELETE FROM {{ this }}
                     WHERE tahun_periode IN ({{ ns.tp_list | join(', ') }});
                 {%- elif ns.filter_periods and mode == 'yp' and (ns.period_pairs | length) > 0 -%}
+                    {%- for pair in ns.period_pairs %}
                     DELETE FROM {{ this }}
-                    WHERE (
-                        {%- for pair in ns.period_pairs -%}
-                        (tahun = {{ pair[0] }} AND periode = {{ pair[1] }}){% if not loop.last %} OR {% endif %}
-                        {%- endfor -%}
-                    );
+                    WHERE tahun = {{ pair[0] }} AND periode = {{ pair[1] }};
+                    {%- endfor -%}
                 {%- endif -%}
             {%- endif -%}
         {%- endif -%}

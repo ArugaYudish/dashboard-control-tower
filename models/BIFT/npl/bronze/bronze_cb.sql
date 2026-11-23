@@ -9,6 +9,7 @@
         materialized='incremental',
         alias='bronze_cb',
         incremental_strategy='append',
+        on_schema_change='append_new_columns',
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
             """
@@ -47,7 +48,8 @@
                 group_channel_id varchar NULL,
                 group_channel_nm varchar NULL,
                 flag_aktif varchar NULL,
-                group_outlet varchar NULL,
+                group_outlet_id varchar NULL,
+                group_outlet_nm varchar NULL,
                 salesforce_id varchar NULL,
                 gsalesforce1_id text NULL,
                 gsalesforce1_nm text NULL,
@@ -104,6 +106,8 @@
                 flaglimit varchar NULL,
                 indkey_id varchar NULL,
                 last_type varchar NULL,
+                class_id varchar NULL,
+                class_nm varchar NULL,
                 climit numeric NULL
             ) PARTITION BY RANGE (tahun, periode);
 
@@ -174,6 +178,8 @@ WITH customer_with_location AS (
         f.flaglimit,
         f.indkey_id,
         f.last_type,
+        f.class_id,
+        f.class_nm,
         f.climit,
         vol.latitude,
         vol.longitude,
@@ -236,7 +242,8 @@ SELECT
     dgc.group_channel_id,
     dgc.group_channel_nm,
     dfs.flag_aktif,
-    dfs.group_outlet,
+    dfs.group_outlet AS group_outlet_id,
+    mgo.group_outlet_nm,
     dfs.salesforce_id,
     mmgs.gsalesforce1_id,
     mmgs.gsalesforce1_nm,
@@ -297,6 +304,8 @@ SELECT
     cwl.flaglimit,
     cwl.indkey_id,
     cwl.last_type,
+    cwl.class_id,
+    cwl.class_nm,
     cwl.climit
 FROM {{ ref('dim_fcustsls') }} dfs
 INNER JOIN {{ ref('dim_salesman_hierarchy') }} sh 
@@ -313,6 +322,14 @@ LEFT JOIN {{ ref('dim_group_channel') }} dgc
 LEFT JOIN {{ ref('dim_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND sh.source_schema = mmgs.source_schema
+LEFT JOIN (
+    SELECT DISTINCT ON (group_outlet_id)
+        group_outlet_id,
+        group_outlet_nm
+    FROM top_urgent.m_group_outlet
+    ORDER BY group_outlet_id
+) mgo
+    ON dfs.group_outlet = mgo.group_outlet_id
 LEFT JOIN customer_with_location cwl
     ON dfs.distributor_id = cwl.distributor_id 
    AND dfs.cust_id = cwl.cust_id
