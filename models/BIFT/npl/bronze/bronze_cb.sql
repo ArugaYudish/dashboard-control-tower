@@ -242,7 +242,7 @@ SELECT
     dgc.group_channel_id,
     dgc.group_channel_nm,
     dfs.flag_aktif,
-    dfs.group_outlet AS group_outlet_id,
+    cwl.ogrp_id AS group_outlet_id,
     mgo.group_outlet_nm,
     dfs.salesforce_id,
     mmgs.gsalesforce1_id,
@@ -322,6 +322,9 @@ LEFT JOIN {{ ref('dim_group_channel') }} dgc
 LEFT JOIN {{ ref('dim_mapping_group_salesforce') }} mmgs
     ON dfs.salesforce_id = mmgs.salesforce_id
    AND sh.source_schema = mmgs.source_schema
+LEFT JOIN customer_with_location cwl
+    ON dfs.distributor_id = cwl.distributor_id 
+   AND dfs.cust_id = cwl.cust_id
 LEFT JOIN (
     SELECT DISTINCT ON (group_outlet_id)
         group_outlet_id,
@@ -329,10 +332,7 @@ LEFT JOIN (
     FROM top_urgent.m_group_outlet
     ORDER BY group_outlet_id
 ) mgo
-    ON dfs.group_outlet = mgo.group_outlet_id
-LEFT JOIN customer_with_location cwl
-    ON dfs.distributor_id = cwl.distributor_id 
-   AND dfs.cust_id = cwl.cust_id
+    ON cwl.ogrp_id = mgo.group_outlet_id
 WHERE dfs.channel_id != '999'
   AND dfs.flag_aktif = 'Y'
   AND dfs.salesforce_id NOT IN ('999', '116', '213', '222')

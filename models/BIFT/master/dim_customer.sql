@@ -34,7 +34,7 @@
 
 select
     fm.*,
-    COALESCE(fc.ctype, fm.last_class) AS class_id,
+    COALESCE(fc.ctype, fm.oclass_id) AS class_id,
     fc.ctypename AS class_nm
 from raw_ho.fcustmst fm
 left join (
@@ -45,8 +45,8 @@ left join (
     from raw_ho.fclassnew
     order by type, ctype
 ) fc
-    on fm.last_type = fc.type
-   and fm.last_class = fc.ctype
+    on fm.otype_id = fc.type
+   and fm.oclass_id = fc.ctype
 where fm.custno is not null 
   and fm.subdist_id is not null
 {% if is_incremental() and not v_all_periods and ns.has_data %}
