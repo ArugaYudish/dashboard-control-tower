@@ -12,6 +12,7 @@
         on_schema_change='append_new_columns',
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
+            "SELECT pg_advisory_xact_lock(hashtext('{{ this }}'))",
             """
             CREATE TABLE IF NOT EXISTS bift.bronze_cb (
                 source_schema text NULL,

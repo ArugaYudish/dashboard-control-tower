@@ -10,6 +10,7 @@
         incremental_strategy='delete+insert',
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
+            "SELECT pg_advisory_xact_lock(hashtext('{{ this }}'))",
             "{% if is_incremental() and var('all_periods', false) %} TRUNCATE TABLE {{ this }}; {% endif %}"
         ],
         indexes=[

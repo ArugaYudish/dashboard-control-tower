@@ -9,6 +9,7 @@
         incremental_strategy='append',
         pre_hook=[
             "SET LOCAL work_mem = '256MB'",
+            "SELECT pg_advisory_xact_lock(hashtext('{{ this }}'))",
             "{{ bift_delete_target_periods('tp') }}"
         ],
         indexes=[
