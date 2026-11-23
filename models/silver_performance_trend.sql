@@ -68,7 +68,8 @@ fdos as (
     sta.period,
     sta.year,
     sta.parent_id,
-    sum(coalesce(fdos.fdos_update,0)) as fdos_update, sum(coalesce(sta.sta_qty,0)) as sta_qty
+    sum(coalesce(fdos.fdos_update,0)) as fdos_update, sum(coalesce(sta.sta_qty,0)) as sta_qty,
+    sum(coalesce(fdos.sta_sl_fdos_qty,0)) as sta_sl_fdos_qty, sum(coalesce(fdos.sta_sl_fdos_value,0)) as sta_sl_fdos_value
   from (
     select
       cw.period, mss.year, mp.parent_id, mss.week, mss.distributor_id,
@@ -83,12 +84,19 @@ fdos as (
   left join (
     select
       vfu.period, vfu.year, mp.parent_id, vfu.week, vfu.distributor_id,
-      sum(vfu.fdos_update) as fdos_update
+      sum(vfu.fdos_update) as fdos_update,
+      sum(vfu.qty_bill) as sta_sl_fdos_qty,
+      sum(vfu.qty_bill * coalesce(mpd.price,0)) as sta_sl_fdos_value
     from {{ ref('silver_fdos_update_from_gold') }} vfu
     join cycle_week cw
       on cw.year = vfu.year and cw.week = vfu.week
     left join spx.m_product mp
       on mp.pcode = vfu.pcode
+    -- left joins: pricing must not drop rows from fdos_update.
+    left join spx.m_distributor md
+      on md.distributor_id = vfu.distributor_id
+    left join spx.m_price_divisi mpd
+      on mpd.pcode = vfu.pcode and mpd.year = vfu.year and mpd.sls_div = md.sls_div
     group by vfu.period, vfu.year, mp.parent_id, vfu.week, vfu.distributor_id
   ) fdos
     on  fdos.week           = sta.week
@@ -132,7 +140,8 @@ select   ph.div_id as sbu_id, ph.div_nm as sbu_name,
   cw.period, cw.periodName, cw.year,
     coalesce(fdis.fdis_update,0) as fdis_update, coalesce(fdis_actual.fdis_actual,0) as fdis_actual,  
   coalesce(fdos.fdos_update,0) as fdos_update, coalesce(fdos.sta_qty,0) as sta_qty, 
-  coalesce(sales.salfo_qty,0) as salfo_qty, coalesce(sales.stm_qty,0) as stm_qty
+  coalesce(sales.salfo_qty,0) as salfo_qty, coalesce(sales.stm_qty,0) as stm_qty,
+  coalesce(fdos.sta_sl_fdos_qty,0) as sta_sl_fdos_qty, coalesce(fdos.sta_sl_fdos_value,0) as sta_sl_fdos_value
  from product_hierarchy ph join (select distinct year, period, periodName, param from cycle_week) cw on ph.param = cw.param
 left join fdis
   on fdis.parent_id = ph.parent_id and fdis.period = cw.period

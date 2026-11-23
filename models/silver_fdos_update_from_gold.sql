@@ -13,7 +13,9 @@ select
   gsf.subdist_id           as distributor_id,
   gsf.kdbarang             as pcode,
   sum(gsf.so_awal_fdos)    as fdos_update,
-  sum(gsf.so_awal_spk)     as alokasi
+  sum(gsf.so_awal_spk)     as alokasi,
+  -- Billed qty across every SO type (FDOS + SPK + SPO), not FDOS-only.
+  sum(gsf.qty_bill)        as qty_bill
 from {{ ref('gold_sl_fdos') }} gsf
 join spx.m_cycle2 mc
   on gsf.year = mc.year
