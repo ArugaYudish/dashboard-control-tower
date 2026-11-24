@@ -69,7 +69,9 @@ fdos as (
     sta.year,
     sta.parent_id,
     sum(coalesce(fdos.fdos_update,0)) as fdos_update, sum(coalesce(sta.sta_qty,0)) as sta_qty,
-    sum(coalesce(fdos.sta_sl_fdos_qty,0)) as sta_sl_fdos_qty, sum(coalesce(fdos.sta_sl_fdos_value,0)) as sta_sl_fdos_value
+    sum(coalesce(fdos.sta_sl_fdos_qty,0)) as sta_sl_fdos_qty, sum(coalesce(fdos.sta_sl_fdos_value,0)) as sta_sl_fdos_value,
+    sum(coalesce(fdos.spo_qty,0)) as spo_qty, sum(coalesce(fdos.spo_value,0)) as spo_value,
+    sum(coalesce(fdos.alokasi_qty,0)) as alokasi_qty, sum(coalesce(fdos.alokasi_value,0)) as alokasi_value
   from (
     select
       cw.period, mss.year, mp.parent_id, mss.week, mss.distributor_id,
@@ -86,7 +88,11 @@ fdos as (
       vfu.period, vfu.year, mp.parent_id, vfu.week, vfu.distributor_id,
       sum(vfu.fdos_update) as fdos_update,
       sum(vfu.qty_bill) as sta_sl_fdos_qty,
-      sum(vfu.qty_bill * coalesce(mpd.price,0)) as sta_sl_fdos_value
+      sum(vfu.qty_bill * coalesce(mpd.price,0)) as sta_sl_fdos_value,
+      sum(vfu.spo) as spo_qty,
+      sum(vfu.spo * coalesce(mpd.price,0)) as spo_value,
+      sum(vfu.alokasi) as alokasi_qty,
+      sum(vfu.alokasi * coalesce(mpd.price,0)) as alokasi_value
     from {{ ref('silver_fdos_update_from_gold') }} vfu
     join cycle_week cw
       on cw.year = vfu.year and cw.week = vfu.week
@@ -141,7 +147,9 @@ select   ph.div_id as sbu_id, ph.div_nm as sbu_name,
     coalesce(fdis.fdis_update,0) as fdis_update, coalesce(fdis_actual.fdis_actual,0) as fdis_actual,  
   coalesce(fdos.fdos_update,0) as fdos_update, coalesce(fdos.sta_qty,0) as sta_qty, 
   coalesce(sales.salfo_qty,0) as salfo_qty, coalesce(sales.stm_qty,0) as stm_qty,
-  coalesce(fdos.sta_sl_fdos_qty,0) as sta_sl_fdos_qty, coalesce(fdos.sta_sl_fdos_value,0) as sta_sl_fdos_value
+  coalesce(fdos.sta_sl_fdos_qty,0) as sta_sl_fdos_qty, coalesce(fdos.sta_sl_fdos_value,0) as sta_sl_fdos_value,
+  coalesce(fdos.spo_qty,0) as spo_qty, coalesce(fdos.spo_value,0) as spo_value,
+  coalesce(fdos.alokasi_qty,0) as alokasi_qty, coalesce(fdos.alokasi_value,0) as alokasi_value
  from product_hierarchy ph join (select distinct year, period, periodName, param from cycle_week) cw on ph.param = cw.param
 left join fdis
   on fdis.parent_id = ph.parent_id and fdis.period = cw.period

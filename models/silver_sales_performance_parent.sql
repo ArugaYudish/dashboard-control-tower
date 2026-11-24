@@ -263,10 +263,14 @@ avgs_ibn as (
 fdos as
 (
   SELECT a.year, a.week, a.distributor_id, a.pg_id, SUM(a.fdos_update) as fdos_update, SUM(a.fdos_value) as fdos_value,
-         SUM(a.sta_sl_fdos_qty) as sta_sl_fdos_qty, SUM(a.sta_sl_fdos_value) as sta_sl_fdos_value
+         SUM(a.sta_sl_fdos_qty) as sta_sl_fdos_qty, SUM(a.sta_sl_fdos_value) as sta_sl_fdos_value,
+         SUM(a.spo_qty) as spo_qty, SUM(a.spo_value) as spo_value,
+         SUM(a.alokasi_qty) as alokasi_qty, SUM(a.alokasi_value) as alokasi_value
   FROM (
 select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_update, vfu.fdos_update * coalesce(mpd.price,0) as fdos_value,
-       vfu.qty_bill as sta_sl_fdos_qty, vfu.qty_bill * coalesce(mpd.price,0) as sta_sl_fdos_value
+       vfu.qty_bill as sta_sl_fdos_qty, vfu.qty_bill * coalesce(mpd.price,0) as sta_sl_fdos_value,
+       vfu.spo as spo_qty, vfu.spo * coalesce(mpd.price,0) as spo_value,
+       vfu.alokasi as alokasi_qty, vfu.alokasi * coalesce(mpd.price,0) as alokasi_value
    from {{ ref('silver_fdos_update_from_gold') }} vfu
  	inner join cycle_ranked cw on vfu.year = cw.year and vfu.period = cw.period and vfu.week = cw.week
 	inner join pcode_pg pg on vfu.pcode = pg.pcode
@@ -330,7 +334,11 @@ select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period 
          false
        ) as is_divisi_match,
        -- Billed qty from SL (gold_sl_fdos.qty_bill, all SO types), priced like fdos_value.
-       fdos.sta_sl_fdos_qty, fdos.sta_sl_fdos_value
+       fdos.sta_sl_fdos_qty, fdos.sta_sl_fdos_value,
+       -- SO awal SPO dari SL (gold_sl_fdos.so_awal_spo), harga sama dengan fdos_value.
+       fdos.spo_qty, fdos.spo_value,
+       -- Alokasi = SO awal SPK dari SL (gold_sl_fdos.so_awal_spk), harga sama dengan fdos_value.
+       fdos.alokasi_qty, fdos.alokasi_value
 from all_keys k
 join cycle_ranked cr on cr.year = k.year and cr.week = k.week
 join pg_dim d on d.pg_id = k.pg_id

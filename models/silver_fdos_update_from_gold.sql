@@ -14,6 +14,7 @@ select
   gsf.kdbarang             as pcode,
   sum(gsf.so_awal_fdos)    as fdos_update,
   sum(gsf.so_awal_spk)     as alokasi,
+  sum(gsf.so_awal_spo)     as spo,
   -- Billed qty across every SO type (FDOS + SPK + SPO), not FDOS-only.
   sum(gsf.qty_bill)        as qty_bill
 from {{ ref('gold_sl_fdos') }} gsf
