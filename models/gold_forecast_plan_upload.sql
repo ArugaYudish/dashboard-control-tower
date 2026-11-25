@@ -211,7 +211,8 @@ select a.channel,
        a.distributor_id, md.distributor_nm as distributor_name,
        a.fdos_plan, a.fdis_plan, a.salfo,
        coalesce(stm.stm_qty, 0) as stm_qty, coalesce(stm.stm_value, 0) as stm_value,
-       a.pg_id, now() as loaded_at
+       a.pg_id, now() as loaded_at,
+       cycle.jmlWeek as jumlah_week
 from agg a
 join pg_dim d on d.pg_id = a.pg_id
 left join spx.m_division mdiv on mdiv.div_id = d.div_id
@@ -232,3 +233,5 @@ left join stm
   and stm.period         = a.period
   and stm.pg_id          = a.pg_id
   and stm.distributor_id = a.distributor_id
+left join (select year, period, count(distinct week) as jmlWeek from spx.m_cycle3 
+group by year, period) cycle ON cycle.year = a.year and cycle.period = a.period
