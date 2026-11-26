@@ -338,12 +338,14 @@ select md.sls_div as channel, k.year, cr.period, to_char(to_date(cast(cr.period 
        -- SO awal SPO dari SL (gold_sl_fdos.so_awal_spo), harga sama dengan fdos_value.
        fdos.spo_qty, fdos.spo_value,
        -- Alokasi = SO awal SPK dari SL (gold_sl_fdos.so_awal_spk), harga sama dengan fdos_value.
-       fdos.alokasi_qty, fdos.alokasi_value
+       fdos.alokasi_qty, fdos.alokasi_value, mbd.day as buffer_day, mldp.day as ldp_day
 from all_keys k
 join cycle_ranked cr on cr.year = k.year and cr.week = k.week
 join pg_dim d on d.pg_id = k.pg_id
 left join {{ ref('division_group_map') }} dg on dg.div_id = d.div_id
 join spx.m_distributor md on md.distributor_id = k.distributor_id
+left join spx.m_buffer_day_dist mbd on mbd.distributor_id = k.distributor_id
+left join spx.m_ldp_dist mldp on mldp.distributor_id = k.distributor_id
 left join spx.m_division mdiv on mdiv.div_id = d.div_id
 left join spx.m_brand mbrand on mbrand.brand_id = d.brand_id
 -- subbrand_id is not globally unique (603 exists under brand 601 GENTLEGEN PCH and
