@@ -103,14 +103,18 @@ left join fdis_plan  on fdis_plan.parent_id = ph.parent_id
 select channel, a.year, a.period, a.periodname, a.week, nsm_id, nsm_name, grsm_id, grsm_name, rsm_id, rsm_name, ss_id, ss_name,
 	sbu_id, sbu_name, brand_id, brand_name, subbrand_id,subbrand_name,a.parent_id,parent_name,flag_sku,a.distributor_id,distributor_name,
 	salfo_qty, salfo_value, stm_qty, stm_value, fdos_update, fdos_value, sta_qty, sta_value, fdis_update, fdis_actual, fdis_plan, fdos_plan,
-	spo_qty, spo_value, alokasi_qty, alokasi_value
+	spo_qty, spo_value, alokasi_qty, alokasi_value,
+	-- stock subdist (spx.v_stock_dist via silver_sales_performance_parent), ditambah di akhir
+	-- supaya posisi kolom lama tetap stabil untuk Superset.
+	stock_qty, stock_value
 FROM
 (select channel, ssp.year, ssp.period, ssp.periodname, ssp.week,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,brand_name,subbrand_id,subbrand_name,ssp.parent_id,parent_name,flag_sku,
 	ssp.distributor_id,distributor_name,
 	sum(salfo_qty) as salfo_qty, SUM(salfo_value) as salfo_value, SUM(stm_qty) as stm_qty, SUM(stm_value) as stm_value,
 	SUM(fdos_update) as fdos_update, SUM(fdos_value) as fdos_value, SUM(sta_qty) as sta_qty, SUM(sta_value) as sta_value,
 	SUM(spo_qty) as spo_qty, SUM(spo_value) as spo_value,
-	SUM(alokasi_qty) as alokasi_qty, SUM(alokasi_value) as alokasi_value
+	SUM(alokasi_qty) as alokasi_qty, SUM(alokasi_value) as alokasi_value,
+	SUM(stock_qty) as stock_qty, SUM(stock_value) as stock_value
 from spx.silver_sales_performance_parent ssp
 	inner join cycle_week cw on ssp.year = cw.year and ssp.period = cw.period and ssp.week = cw.week
 group by channel, ssp.year, ssp.period, ssp.periodname, ssp.week,nsm_id,nsm_name,grsm_id,grsm_name,rsm_id,rsm_name,ss_id,ss_name,sbu_id,sbu_name,brand_id,
