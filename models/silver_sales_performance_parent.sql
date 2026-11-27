@@ -62,10 +62,12 @@
 -- single parent-level value COPIED onto each row instead of split -- inflating every sum
 -- by the number of product groups under that parent (up to 5x; 123 of 1876 parents affected).
 
-{#- Year bounds as int: extract() returns numeric, and `int_col between numeric` casts the
-    column side, which disables the (year, week) indexes in db/source_indexes.sql. -#}
-{%- set yr_from = "(extract(year from current_date)::int - 1)" -%}
-{%- set yr_to   = "extract(year from current_date)::int" -%}
+{# Year bounds as int: extract() returns numeric, and `int_col between numeric` casts the
+   column side, which disables the (year, week) indexes in db/source_indexes.sql.
+   No `-` whitespace control on these tags: trimming would glue the next line onto the
+   preceding `-- ...` SQL comment and comment it out. #}
+{% set yr_from = "(extract(year from current_date)::int - 1)" %}
+{% set yr_to   = "extract(year from current_date)::int" %}
 
 with cycle_ranked as (
   select year, week, period,
@@ -78,18 +80,10 @@ with cycle_ranked as (
   where year between {{ yr_from }} and {{ yr_to }}
   group by year, week, period
 ),
--- One row per calendar week. A week straddling two periods has two rows in cycle_ranked, so
--- the rolling-window ranking lives here: such a week counts as one week, not two, in
--- "Last 5W" / "Last 13W".
---
--- Source CTEs (salfo, stock, stm, wh_stock, omset_ibn, target) are NOT joined to any
--- calendar CTE -- only a plain `year between` filter on the source column:
---   * joining cycle_ranked on (year, week) doubled every row of a straddling week;
---   * joining a CTE on top of a year filter double-counts selectivity on the same column,
---     the planner underestimates to a handful of rows and falls back to nested loops
---     (a build ran > 3.5 h that way).
--- Weeks that are not in m_cycle3 drop out in the final `join cycle_ranked`, so the output
--- is unchanged.
+-- One row per calendar week. A week straddling two periods has two rows in cycle_ranked;
+-- every source CTE below filters on THIS (unique on year, week) instead, otherwise each of
+-- its rows was joined twice and the week's values doubled. The rolling-window ranking also
+-- lives here so such a week counts as one week, not two, in "Last 5W" / "Last 13W".
 week_ranked as (
   select year, week,
          min(week_start) as week_start,
@@ -266,7 +260,7 @@ wh_stock as (
   from
   (
   select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty as qty, ((a.qty) * coalesce(mpd.price,0)) as qty_value
-  from spx.t_stock_wh_fdisupd a join spx.m_product mp on a.pcode = mp.pcode
+  from spx.t_stock_wh_fdisupd a inner join week_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
      left join spx.m_price_divisi mpd on a.year = mpd.year and mp.sls_div = mpd.sls_div and a.pcode = mpd.pcode
   where a.year between {{ yr_from }} and {{ yr_to }}
   ) a
@@ -274,7 +268,7 @@ wh_stock as (
 ),
 omset_ibn as (
   select a.year, a.week, pg.pg_id, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
-  from spx.v_sta_subdist a
+  from spx.v_sta_subdist a inner join week_ranked cr on a.year = cr.year and a.week = cr.week
   	join pcode_pg pg on a.pcode = pg.pcode
   where a.year between {{ yr_from }} and {{ yr_to }}
   group by a.year, a.week, pg.pg_id, distributor_id
@@ -311,6 +305,7 @@ select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_upda
 target as (
   select v.year, v.week, v.distributor_id, p.pg_id, v.target_qty, v.target_value
   from spx.v_target_weekly_by_parent v
+   inner join week_ranked cr on v.year = cr.year and v.week = cr.week
   join pg_primary p on p.parent_id = v.parent_id
   where v.year between {{ yr_from }} and {{ yr_to }}
 ),
