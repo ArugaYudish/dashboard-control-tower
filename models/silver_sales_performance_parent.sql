@@ -62,33 +62,48 @@
 -- single parent-level value COPIED onto each row instead of split -- inflating every sum
 -- by the number of product groups under that parent (up to 5x; 123 of 1876 parents affected).
 
+{#- Year bounds as int: extract() returns numeric, and `int_col between numeric` casts the
+    column side, which disables the (year, week) indexes in db/source_indexes.sql. -#}
+{%- set yr_from = "(extract(year from current_date)::int - 1)" -%}
+{%- set yr_to   = "extract(year from current_date)::int" -%}
+
 with cycle_ranked as (
   select year, week, period,
          min(cdate) as week_start,
          max(cdate) as week_end,
-         row_number() over (order by min(cdate)) as rn,
-         case when year = EXTRACT(YEAR FROM CURRENT_DATE) then 'cy'
-  		 when year = EXTRACT(YEAR FROM CURRENT_DATE) -1 then 'ly'
-  	end as flag
+         case when year = {{ yr_to }}   then 'cy'
+              when year = {{ yr_from }} then 'ly'
+         end as flag
   from spx.m_cycle3
-  where  year between extract(year from current_date) - 1
-                 and extract(year from current_date)
+  where year between {{ yr_from }} and {{ yr_to }}
   group by year, week, period
 ),
--- The week the calendar is in right now. min(rn) because a week straddling two periods has
--- two rows in cycle_ranked and both of them are current. An aggregate with no GROUP BY always
--- returns exactly one row, so the cross join below cannot fan out; if no week has started yet
--- rn is NULL, which falls through to the W-2 branch.
+-- One row per calendar week. A week straddling two periods has two rows in cycle_ranked, so
+-- the rolling-window ranking lives here: such a week counts as one week, not two, in
+-- "Last 5W" / "Last 13W".
+--
+-- Source CTEs (salfo, stock, stm, wh_stock, omset_ibn, target) are NOT joined to any
+-- calendar CTE -- only a plain `year between` filter on the source column:
+--   * joining cycle_ranked on (year, week) doubled every row of a straddling week;
+--   * joining a CTE on top of a year filter double-counts selectivity on the same column,
+--     the planner underestimates to a handful of rows and falls back to nested loops
+--     (a build ran > 3.5 h that way).
+-- Weeks that are not in m_cycle3 drop out in the final `join cycle_ranked`, so the output
+-- is unchanged.
+week_ranked as (
+  select year, week,
+         min(week_start) as week_start,
+         row_number() over (order by min(week_start)) as rn
+  from cycle_ranked
+  group by year, week
+),
+-- The week the calendar is in right now = the latest week that has started. An aggregate
+-- with no GROUP BY always returns exactly one row, so the cross join below cannot fan out;
+-- if no week has started yet rn is NULL, which falls through to the W-2 branch.
 current_week as (
-  select min(cr.rn) as rn
-  from cycle_ranked cr
-  join (
-    select year, week
-    from cycle_ranked
-    where week_start::date <= current_date
-    order by week_start desc
-    limit 1
-  ) c on c.year = cr.year and c.week = cr.week
+  select max(rn) as rn
+  from week_ranked
+  where week_start::date <= current_date
 ),
 -- Last source week of each target week's rolling averages (requirement "Last 5W"):
 --   past week              -> W-1: by now that week has closed.
@@ -99,7 +114,7 @@ current_week as (
 week_cutoff as (
   select w.year, w.week,
          w.rn - case when w.rn < cw.rn then 1 else 2 end as cutoff_rn
-  from cycle_ranked w
+  from week_ranked w
   cross join current_week cw
 ),
 -- For every target week, list the source weeks feeding its rolling averages:
@@ -110,7 +125,7 @@ week_windows as (
          (src.rn between w.cutoff_rn - 4  and w.cutoff_rn) as in_5w,
          (src.rn between w.cutoff_rn - 12 and w.cutoff_rn) as in_13w
   from week_cutoff w
-  join cycle_ranked src on src.rn between w.cutoff_rn - 12 and w.cutoff_rn
+  join week_ranked src on src.rn between w.cutoff_rn - 12 and w.cutoff_rn
 ),
 window_counts as (
   select year, week,
@@ -173,42 +188,52 @@ salfo as (
 	from
 	(
 	select vscw.year, vscw.week, vscw.pcode, pg.pg_id, vscw.distributor_id, coalesce(vscw.qty,0) as qty, coalesce(vscw.qty,0)*coalesce(mp.price,0) as salfo_value
-	 from spx.t_salfo_confirm_weekly vscw inner join cycle_ranked cr on vscw.year = cr.year and vscw.week = cr.week join pcode_pg pg on vscw.pcode = pg.pcode
+	 from spx.t_salfo_confirm_weekly vscw join pcode_pg pg on vscw.pcode = pg.pcode
 		left join spx.m_distributor md on vscw.distributor_id = md.distributor_id
 		left join spx.m_price_divisi mp on vscw.year = mp.year and md.sls_div = mp.sls_div and vscw.pcode = mp.pcode
+	 where vscw.year between {{ yr_from }} and {{ yr_to }}
 	) a
 	group by year, week, pg_id, distributor_id
 ),
 stock as (
-	select a.year, a.week, a.distributor_id, a.pg_id, sum(qty) as stock_qty, sum(qty_value) as stock_value, SUM(git_qty) as git_qty, sum(git_value) as git_value
+	select a.year, a.week, a.distributor_id, a.pg_id, a.stock_qty, a.stock_value, a.git_qty, a.git_value
 	from
 	(
-	select vss.year, vss.week, vss.sub_id as distributor_id, vss.pcode, pg.pg_id, vss.qty, (vss.qty * mp.price) as qty_value, vss.git_qty, (vss.git_qty * mp.price) as git_value
-	 from spx.v_stock_dist vss inner join cycle_ranked cr on vss.year = cr.year and vss.week = cr.week join pcode_pg pg on vss.pcode = pg.pcode
-			join pg_dim d on d.pg_id = pg.pg_id
+	select vss.year, vss.week, vss.sub_id as distributor_id, pg.pg_id,
+	       sum(vss.qty) as stock_qty, sum(vss.qty * mp.price) as stock_value,
+	       sum(vss.git_qty) as git_qty, sum(vss.git_qty * mp.price) as git_value
+	 from spx.v_stock_dist vss join pcode_pg pg on vss.pcode = pg.pcode
 			left join spx.m_distributor md on vss.sub_id = md.distributor_id
-			left join {{ ref('division_group_map') }} dg on dg.div_id = d.div_id
 			left join spx.m_price_divisi mp on vss.year = mp.year and md.sls_div = mp.sls_div and vss.pcode = mp.pcode
+	 where vss.year between {{ yr_from }} and {{ yr_to }}
+	 group by vss.year, vss.week, vss.sub_id, pg.pg_id
+	) a
+	join pg_dim d on d.pg_id = a.pg_id
+	left join spx.m_distributor md on md.distributor_id = a.distributor_id
+	left join {{ ref('division_group_map') }} dg on dg.div_id = d.div_id
 	 -- Guard divisi: subdist M1 / M245 / M3 hanya boleh membawa stock & GIT dari divisi
 	 -- produknya sendiri. Baris nyasar dari sumber (upload salah, fallback mapping) dibuang
 	 -- di sini supaya tidak muncul di dashboard. Divisi distributor lain (MT, INS, NULL)
 	 -- tidak dijaga. div_id yang belum ada di seed division_group_map ikut terbuang untuk
 	 -- subdist M1/M245/M3 -- tambahkan ke seed kalau ada divisi produk baru.
-	 where coalesce(md.divisi, '') not in ('M1', 'M245', 'M3')
-	    or md.divisi = case
-	                     when dg.m_group = 'M1'                   then 'M1'
-	                     when dg.m_group in ('M2', 'M4', 'M5')    then 'M245'
-	                     when dg.m_group = 'M3'                   then 'M3'
-	                   end
-	) a
-	group by a.year, a.week, a.distributor_id, a.pg_id
+	 -- Kondisinya hanya bergantung pada (distributor, pg_id), jadi dievaluasi SETELAH agregasi:
+	 -- sekali per grup, bukan per baris pcode. Hasilnya identik.
+	where coalesce(md.divisi, '') not in ('M1', 'M245', 'M3')
+	   or md.divisi = case
+	                    when dg.m_group = 'M1'                   then 'M1'
+	                    when dg.m_group in ('M2', 'M4', 'M5')    then 'M245'
+	                    when dg.m_group = 'M3'                   then 'M3'
+	                  end
 ),
 stm as (
 select a.year, a.week, a.distributor_id, a.pg_id, sum(omsetqty) as stm_qty, sum(qty_value) as stm_value
 	from
 	(
 	select cast(vss.tahun as int) as year, cast(vss.week as int) as week, vss.distributor_id, vss.pcode, pg.pg_id, vss.omsetqty, vss.omsetvalue as qty_value
-	 from spx.v_omset_subdist_weekly_bw vss inner join cycle_ranked cr on cast(vss.tahun as int) = cr.year and cast(vss.week as int) = cr.week join pcode_pg pg on vss.pcode = pg.pcode
+	 from spx.v_omset_subdist_weekly_bw vss join pcode_pg pg on vss.pcode = pg.pcode
+	 -- cast(... as int) is kept on purpose: it matches the expression index
+	 -- ix_v_omset_bw_year_week in db/source_indexes.sql.
+	 where cast(vss.tahun as int) between {{ yr_from }} and {{ yr_to }}
 	) a
 	group by a.year, a.week, a.distributor_id, a.pg_id
 ),
@@ -241,15 +266,17 @@ wh_stock as (
   from
   (
   select a.year, a.week, a.pcode, mp.parent_id, mpd.price, a.qty as qty, ((a.qty) * coalesce(mpd.price,0)) as qty_value
-  from spx.t_stock_wh_fdisupd a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week  join spx.m_product mp on a.pcode = mp.pcode
+  from spx.t_stock_wh_fdisupd a join spx.m_product mp on a.pcode = mp.pcode
      left join spx.m_price_divisi mpd on a.year = mpd.year and mp.sls_div = mpd.sls_div and a.pcode = mpd.pcode
+  where a.year between {{ yr_from }} and {{ yr_to }}
   ) a
   group by a.year, a.week, a.parent_id
 ),
 omset_ibn as (
   select a.year, a.week, pg.pg_id, distributor_id, sum(sta_qty) as sta_qty, sum(sta_value) as sta_value
-  from spx.v_sta_subdist a inner join cycle_ranked cr on a.year = cr.year and a.week = cr.week
+  from spx.v_sta_subdist a
   	join pcode_pg pg on a.pcode = pg.pcode
+  where a.year between {{ yr_from }} and {{ yr_to }}
   group by a.year, a.week, pg.pg_id, distributor_id
 ),
 avgs_ibn as (
@@ -276,6 +303,7 @@ select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_upda
 	inner join pcode_pg pg on vfu.pcode = pg.pcode
   inner join spx.m_distributor md on vfu.distributor_id = md.distributor_id
   left join spx.m_price_divisi mpd on vfu.pcode = mpd.pcode and vfu.year = mpd.year and md.sls_div = mpd.sls_div
+  where vfu.year between {{ yr_from }} and {{ yr_to }}
  ) a
  GROUP BY a.year, a.week, a.distributor_id, a.pg_id
 ),
@@ -283,8 +311,8 @@ select vfu.year, vfu.week, vfu.distributor_id, pg.pcode, pg.pg_id, vfu.fdos_upda
 target as (
   select v.year, v.week, v.distributor_id, p.pg_id, v.target_qty, v.target_value
   from spx.v_target_weekly_by_parent v
-   inner join cycle_ranked cr on v.year = cr.year and v.week = cr.week
   join pg_primary p on p.parent_id = v.parent_id
+  where v.year between {{ yr_from }} and {{ yr_to }}
 ),
 -- Every key present in any source. Replaces the old target-driven select + `extra_keys`
 -- mirror, which duplicated ~75 lines of SELECT and could drift apart. `union` dedupes,
